@@ -1,0 +1,16 @@
+README.md
+pyproject.toml
+src/damaplus_egregna_bot.egg-info/PKG-INFO
+src/damaplus_egregna_bot.egg-info/SOURCES.txt
+src/damaplus_egregna_bot.egg-info/dependency_links.txt
+src/damaplus_egregna_bot.egg-info/requires.txt
+src/damaplus_egregna_bot.egg-info/top_level.txt
+src/egregna_bot/__init__.py
+src/egregna_bot/capture_session.py
+src/egregna_bot/engine.py
+src/egregna_bot/main.py
+src/egregna_bot/model.py
+src/egregna_bot/session.py
+src/egregna_bot/settings.py
+src/egregna_bot/ui.py
+tests/test_egregna_engine.py

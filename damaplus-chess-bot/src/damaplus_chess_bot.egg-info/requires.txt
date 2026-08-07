@@ -1,0 +1,5 @@
+playwright>=1.46
+python-chess>=1.999
+
+[dev]
+pytest>=8.0

@@ -1,0 +1,1 @@
+"""DamaPlus Chess bot."""

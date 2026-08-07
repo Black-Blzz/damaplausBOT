@@ -1,0 +1,15 @@
+README.md
+pyproject.toml
+src/chess_bot/__init__.py
+src/chess_bot/capture_session.py
+src/chess_bot/engine.py
+src/chess_bot/main.py
+src/chess_bot/session.py
+src/chess_bot/settings.py
+src/chess_bot/ui.py
+src/damaplus_chess_bot.egg-info/PKG-INFO
+src/damaplus_chess_bot.egg-info/SOURCES.txt
+src/damaplus_chess_bot.egg-info/dependency_links.txt
+src/damaplus_chess_bot.egg-info/requires.txt
+src/damaplus_chess_bot.egg-info/top_level.txt
+tests/test_engine.py

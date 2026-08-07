@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: damaplus-chess-bot
+Version: 0.1.0
+Summary: Disclosed DamaPlus Chess Playwright bot
+Requires-Python: >=3.11
+Requires-Dist: playwright>=1.46
+Requires-Dist: python-chess>=1.999
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"

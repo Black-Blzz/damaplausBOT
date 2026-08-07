@@ -1,0 +1,38 @@
+
+  {
+    "base_url": "https://damaplus.online/",
+    "headless": false,
+    "poll_interval_seconds": 2.0,
+    "action_delay_ms": [350, 900],
+    "difficulty_weights": {
+      "beginner": 1.0
+    },
+    "hard_search_depth": 1,
+    "accounts": [
+      {
+        "id": "damaplus-tankegna-bot-1",
+        "storage_state": "sessions/damaplus-tankegna-bot-1.storage.json",
+        "variant": "tankegna"
+      }
+    ],
+    "selectors": {
+      "authenticated": "#playerApp:not(.hidden)",
+      "logged_out": "#authLanding:not(.hidden)",
+      "tankegna_matchmaking": "[data-start='dama-tankegna']",
+      "match_found": "#damaBoard",
+      "board_square": "#damaBoard > .square",
+      "piece": ".piece",
+      "turn_indicator": "#damaStatus",
+      "game_over": "#damaStatus",
+      "return_home": ".nav-item[data-view='home']"
+    },
+    "attributes": {
+      "square": "data-square",
+      "piece_color": "data-piece-color",
+      "piece_king": "data-is-king",
+      "bot_color": "data-player-color",
+      "turn": "data-player",
+      "result": "data-result",
+      "ui_mode": "damaplus"
+    }
+  }

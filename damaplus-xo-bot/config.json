@@ -1,0 +1,15 @@
+{
+  "base_url": "https://damaplus.online/",
+  "headless": false,
+  "poll_interval_seconds": 1.0,
+  "action_delay_ms": [350, 900],
+  "difficulty_weights": {"mistake_rate": 0.35},
+  "hard_search_depth": 0,
+  "accounts": [{"id": "disclosed-xo-bot-1", "storage_state": "sessions/disclosed-xo-bot-1.storage.json", "variant": "xo"}],
+  "selectors": {
+    "authenticated": "#playerApp:not(.hidden)", "logged_out": "#authLanding:not(.hidden)",
+    "xo_matchmaking": "[data-start='xo']", "turn_indicator": "#xoStatus",
+    "cell": "#xoBoard > .xo-cell", "return_home": ".nav-item[data-view='home']"
+  },
+  "attributes": {"ui_mode": "damaplus"}
+}

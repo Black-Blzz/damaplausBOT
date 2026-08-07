@@ -1,0 +1,23 @@
+{
+  "base_url": "https://damaplus.online/",
+  "headless": false,
+  "poll_interval_seconds": 1.0,
+  "action_delay_ms": [350, 900],
+  "search_depth": 1,
+  "bot_elo": 300,
+  "accounts": [{
+    "id": "disclosed-chess-bot-1",
+    "storage_state": "sessions/disclosed-chess-bot-1.storage.json",
+    "variant": "chess"
+  }],
+  "selectors": {
+    "authenticated": "#playerApp:not(.hidden)",
+    "logged_out": "#authLanding:not(.hidden)",
+    "chess_view": "[data-start='chess']",
+    "chess_matchmaking": "[data-match='chess']",
+    "board_square": "#chessBoard > .chess-square",
+    "piece": ".chess-piece",
+    "turn_indicator": "#chessStatus",
+    "return_home": ".nav-item[data-view='home']"
+  }
+}

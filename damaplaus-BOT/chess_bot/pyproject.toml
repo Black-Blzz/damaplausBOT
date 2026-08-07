@@ -1,0 +1,13 @@
+[project]
+name = "damaplus-chess-bot"
+version = "0.1.0"
+description = "Disclosed DamaPlus Chess Playwright bot"
+requires-python = ">=3.11"
+dependencies = ["playwright>=1.46", "python-chess>=1.999"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
