@@ -46,7 +46,13 @@ async def run(settings: Settings, check_only: bool) -> None:
                         log.info("match finished: %s", state.result or "unknown")
                         await bot.return_home(); break
                     if state.board is not None and state.bot_turn:
-                        move = choose_move(state.board, settings.search_depth, settings.bot_elo)
+                        try:
+                            move = choose_move(state.board, settings.search_depth, settings.bot_elo)
+                        except ValueError as error:
+                            log.warning("no playable move in live position; reloading game page: %s", error)
+                            await bot.reload()
+                            await asyncio.sleep(settings.poll_interval_seconds)
+                            continue
                         log.info("move %s", move.uci())
                         try:
                             await bot.play(move)

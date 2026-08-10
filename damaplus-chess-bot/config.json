@@ -3,8 +3,8 @@
   "headless": false,
   "poll_interval_seconds": 1.0,
   "action_delay_ms": [350, 900],
-  "search_depth": 1,
-  "bot_elo": 300,
+  "search_depth": 2,
+  "bot_elo": 1000,
   "accounts": [{
     "id": "disclosed-chess-bot-1",
     "storage_state": "sessions/disclosed-chess-bot-1.storage.json",

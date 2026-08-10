@@ -32,5 +32,5 @@ class Settings:
         lo, hi = raw.get("action_delay_ms", [350, 900])
         account = Account(accounts[0]["id"], (source.parent / accounts[0]["storage_state"]).resolve())
         return cls(raw["base_url"], bool(raw.get("headless", True)), float(raw.get("poll_interval_seconds", 1)),
-                   (int(lo), int(hi)), int(raw.get("search_depth", 3)), int(raw.get("bot_elo", 300)),
+                   (int(lo), int(hi)), int(raw.get("search_depth", 2)), int(raw.get("bot_elo", 1000)),
                    account, raw["selectors"])

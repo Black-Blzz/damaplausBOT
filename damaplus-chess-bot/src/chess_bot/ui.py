@@ -80,7 +80,9 @@ class ChessPage:
     async def play(self, move: chess.Move) -> None:
         if self.board is None:
             raise UIChanged("cannot play before reading a Chess position")
-        before = self._placement(self.board)
+        expected = self.board.copy(stack=True)
+        expected.push(move)
+        expected_placement = self._placement(expected)
         await self._click_square(move.from_square)
         await self._click_square(move.to_square)
         # A click can be ignored by the frontend (for example while it is
@@ -89,11 +91,11 @@ class ChessPage:
         # will endlessly click the same stale move.
         deadline = asyncio.get_running_loop().time() + 5
         while asyncio.get_running_loop().time() < deadline:
-            if self._placement(await self._read_board()) != before:
+            if self._placement(await self._read_board()) == expected_placement:
                 self.board.push(move)
                 return
             await asyncio.sleep(0.2)
-        raise UIChanged(f"Chess move {move.uci()} was not accepted by the page")
+        raise UIChanged(f"Chess move {move.uci()} was not confirmed by the page")
 
     async def reload(self) -> None:
         await self.page.reload(wait_until="domcontentloaded")
@@ -132,8 +134,6 @@ class ChessPage:
             return
         candidates = []
         for move in self.board.legal_moves:
-            if self.board.is_en_passant(move):
-                continue
             self.board.push(move)
             matched = self._placement(self.board) == self._placement(snapshot)
             self.board.pop()

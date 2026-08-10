@@ -8,8 +8,8 @@ VALUES = {chess.PAWN: 100, chess.KNIGHT: 320, chess.BISHOP: 330, chess.ROOK: 500
 
 
 def legal_moves(board: chess.Board) -> list[chess.Move]:
-    """The frontend has no en-passant support, so never offer that move."""
-    return [move for move in board.legal_moves if not board.is_en_passant(move)]
+    """Return every legal move, including en passant and castling."""
+    return list(board.legal_moves)
 
 
 def evaluate(board: chess.Board, perspective: chess.Color) -> int:
@@ -20,7 +20,7 @@ def evaluate(board: chess.Board, perspective: chess.Color) -> int:
     return score + (12 if board.is_check() and board.turn != perspective else 0)
 
 
-def choose_move(board: chess.Board, depth: int = 3, elo: int = 300) -> chess.Move:
+def choose_move(board: chess.Board, depth: int = 3, elo: int = 1000) -> chess.Move:
     moves = legal_moves(board)
     if not moves:
         raise ValueError("no legal Chess moves")
@@ -33,10 +33,9 @@ def choose_move(board: chess.Board, depth: int = 3, elo: int = 300) -> chess.Mov
         if is_mate:
             return move
 
-    # Elo is not an exact property of a standalone engine, but a 300-rated
-    # player blunders very frequently.  Make most moves uniformly random and
-    # only occasionally use the material search.  This also keeps decisions
-    # instantaneous instead of stalling the browser game loop.
+    # Elo is not an exact property of a standalone engine. Below 400, inject
+    # frequent blunders; at the configured 1000 level, use the full search.
+    # This keeps weaker presets distinct without slowing the browser loop.
     if elo <= 400 and random.random() < 0.85:
         return random.choice(moves)
     bot = board.turn

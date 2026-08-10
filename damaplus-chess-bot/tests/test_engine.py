@@ -1,5 +1,6 @@
 import chess
 from chess_bot.engine import choose_move, legal_moves
+from chess_bot.ui import ChessPage
 
 
 def test_takes_checkmate_when_available():
@@ -8,9 +9,21 @@ def test_takes_checkmate_when_available():
     assert board.is_checkmate()
 
 
-def test_excludes_en_passant():
+def test_includes_en_passant():
     board = chess.Board("rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3")
-    assert all(not board.is_en_passant(move) for move in legal_moves(board))
+    assert chess.Move.from_uci("e5d6") in legal_moves(board)
+
+
+def test_synchronise_recognises_opponent_en_passant():
+    page = ChessPage(None, None)  # Only its board synchronisation helpers are used here.
+    page.bot_color = chess.WHITE
+    page.board = chess.Board("4k3/8/8/8/3pP3/8/8/4K3 b - e3 0 1")
+    expected = page.board.copy(stack=True)
+    expected.push_uci("d4e3")
+
+    page._synchronise(expected)
+
+    assert page.board.fen() == expected.fen()
 
 
 def test_keeps_castling_move():
