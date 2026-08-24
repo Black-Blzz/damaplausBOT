@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fleet Console</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body class="signin-page">
+
+<main class="signin">
+  <div class="signin-brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <div>
+      <h1>Fleet Console</h1>
+      <p class="brand-sub">damaplus.online</p>
+    </div>
+  </div>
+
+  <form class="signin-card" id="signin" autocomplete="off">
+    <h2>Sign in</h2>
+    <p class="signin-note">This console runs bots that stake real money. Operators only.</p>
+
+    <label class="field">
+      <span>Username</span>
+      <input type="text" id="username" autocomplete="username" autocapitalize="none"
+             spellcheck="false" required autofocus>
+    </label>
+
+    <label class="field">
+      <span>Password</span>
+      <input type="password" id="password" autocomplete="current-password" required>
+    </label>
+
+    <div class="notice bad" id="error" hidden></div>
+
+    <button class="btn btn-primary btn-wide" id="submit" type="submit">Sign in</button>
+  </form>
+</main>
+
+<script>
+'use strict';
+const form = document.getElementById('signin');
+const errorBox = document.getElementById('error');
+const submit = document.getElementById('submit');
+
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  errorBox.hidden = true;
+  submit.disabled = true;
+  submit.textContent = 'Signing in…';
+  try {
+    const response = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: document.getElementById('username').value,
+        password: document.getElementById('password').value,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.ok) {
+      window.location.replace('/');
+      return;
+    }
+    errorBox.textContent = data.error || 'Sign-in failed. Try again.';
+    errorBox.hidden = false;
+    document.getElementById('password').value = '';
+    document.getElementById('password').focus();
+  } catch {
+    errorBox.textContent = 'Could not reach the console. Is it still running?';
+    errorBox.hidden = false;
+  } finally {
+    submit.disabled = false;
+    submit.textContent = 'Sign in';
+  }
+});
+</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 {
   "base_url": "https://damaplus.online/",
-  "headless": false,
+  "headless": true,
   "poll_interval_seconds": 1.0,
   "action_delay_ms": [350, 900],
   "search_depth": 3,

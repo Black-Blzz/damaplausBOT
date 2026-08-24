@@ -5,10 +5,16 @@ import random
 import re
 from dataclasses import dataclass
 
-from playwright.async_api import Locator, Page, TimeoutError as PlaywrightTimeoutError
+from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from .model import Color, Piece, Position, Square
+from botkit.matchmaking import EntryResult, join_match
+
 from .settings import Settings
+
+
+# The identifier the site uses for this game in its lobby API.
+GAME = "dama-egregna"
 
 
 class UIChanged(RuntimeError):
@@ -27,9 +33,25 @@ class EgregnaPage:
     def __init__(self, page: Page, settings: Settings):
         self.page, self.settings, self.bot_color = page, settings, None
 
-    async def queue_egregna(self) -> None:
-        await self.page.goto(self.settings.base_url, wait_until="domcontentloaded")
-        await self._click("egregna_matchmaking", 12_000)
+    async def queue_egregna(self, stake: int, odd_only: bool, control, log, min_balance: float = 10.0) -> EntryResult:
+        """Join matchmaking at ``stake``.
+
+        A fresh match can hand us a different side, so nothing about the
+        previous game is carried over.
+        """
+        self.bot_color = None
+        return await join_match(
+            self.page,
+            base_url=self.settings.base_url,
+            matchmaking_selector=self.settings.selectors["egregna_matchmaking"],
+            game=GAME,
+            stake=stake,
+            control=control,
+            odd_only=odd_only,
+            action_delay_ms=self.settings.action_delay_ms,
+            log=log,
+            min_balance=min_balance,
+        )
 
     async def status(self) -> GameStatus:
         if self.settings.attributes.get("ui_mode") == "damaplus":

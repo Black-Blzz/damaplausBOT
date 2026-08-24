@@ -9,6 +9,8 @@ from .settings import Settings
 
 async def capture(settings: Settings) -> None:
     async with async_playwright() as playwright:
+        # Headed on purpose: a human signs in through this window.  Every
+        # automated path runs headless -- see botkit.runner and dashboard.auth.
         browser = await playwright.chromium.launch(headless=False)
         context = await browser.new_context()
         page = await context.new_page()

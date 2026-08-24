@@ -7,7 +7,13 @@ from dataclasses import dataclass
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
+from botkit.matchmaking import EntryResult, join_match
+
 from .settings import Settings
+
+
+# The identifier the site uses for this game in its lobby API.
+GAME = "xo"
 
 
 class UIChanged(RuntimeError):
@@ -27,12 +33,26 @@ class XoPage:
         self.page, self.settings, self.bot_mark = page, settings, None
         self.last_played_board: tuple[str, ...] | None = None
 
-    async def queue(self) -> None:
-        # A new match may assign a different mark, so never carry it over.
+    async def queue(self, stake: int, odd_only: bool, control, log, min_balance: float = 10.0) -> EntryResult:
+        """Join matchmaking at ``stake``.
+
+        A fresh match can hand us a different side, so nothing about the
+        previous game is carried over.
+        """
         self.bot_mark = None
         self.last_played_board = None
-        await self.page.goto(self.settings.base_url, wait_until="domcontentloaded")
-        await self._click("xo_matchmaking", 12_000)
+        return await join_match(
+            self.page,
+            base_url=self.settings.base_url,
+            matchmaking_selector=self.settings.selectors["xo_matchmaking"],
+            game=GAME,
+            stake=stake,
+            control=control,
+            odd_only=odd_only,
+            action_delay_ms=self.settings.action_delay_ms,
+            log=log,
+            min_balance=min_balance,
+        )
 
     async def wait_for_match(self, timeout_seconds: float = 60.0) -> bool:
         deadline = asyncio.get_running_loop().time() + timeout_seconds
@@ -57,7 +77,11 @@ class XoPage:
         cells = self.page.locator(self.settings.selectors["cell"])
         if await cells.count() != 9:
             raise UIChanged("XO board does not contain nine cells")
-        board = tuple((await cells.nth(i).text_content() or "").strip().upper() for i in range(9))
+        cells_list = await cells.all()
+        board_values = []
+        for cell in cells_list:
+            board_values.append((await cell.text_content() or "").strip().upper())
+        board = tuple(board_values)
         if any(value not in {"", "X", "O"} for value in board):
             raise UIChanged(f"unexpected XO board values: {board}")
 

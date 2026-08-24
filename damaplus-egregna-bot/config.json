@@ -1,6 +1,6 @@
 {
   "base_url": "https://damaplus.online/",
-  "headless": false,
+  "headless": true,
   "poll_interval_seconds": 2.0,
   "action_delay_ms": [350, 900],
   "difficulty_weights": {"easy": 1.0, "medium": 0.0, "hard": 0.0},
@@ -15,7 +15,9 @@
   "selectors": {
     "authenticated": "#playerApp:not(.hidden)",
     "logged_out": "#authLanding:not(.hidden)",
-    "egregna_matchmaking": "[data-start='dama-egregna']",
+    "egregna_matchmaking": "[data-find-player='dama-egregna'], [data-start='dama-egregna']",
+    "match_stake_modal": "#matchStakeModal",
+    "match_stake_choices": "#matchStakeChoices",
     "match_found": "#damaBoard",
     "board_square": "#damaBoard > .square",
     "piece": ".piece",

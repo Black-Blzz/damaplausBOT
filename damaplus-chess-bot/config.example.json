@@ -1,10 +1,16 @@
 {
   "base_url": "https://damaplus.online/",
-  "headless": false,
+  "headless": true,
   "poll_interval_seconds": 1.0,
   "action_delay_ms": [350, 900],
   "search_depth": 2,
   "bot_elo": 1000,
+  "stockfish": {
+    "path": "engines/stockfish/stockfish-windows-x86-64-avx2.exe",
+    "move_time_seconds": 2.0,
+    "threads": 2,
+    "hash_mb": 256
+  },
   "accounts": [{
     "id": "disclosed-chess-bot-1",
     "storage_state": "sessions/disclosed-chess-bot-1.storage.json",

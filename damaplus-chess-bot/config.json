@@ -1,10 +1,16 @@
 {
   "base_url": "https://damaplus.online/",
-  "headless": false,
+  "headless": true,
   "poll_interval_seconds": 1.0,
   "action_delay_ms": [350, 900],
-  "search_depth": 2,
+  "search_depth": 1,
   "bot_elo": 1000,
+  "stockfish": {
+    "path": "engines/stockfish/stockfish-windows-x86-64-avx2.exe",
+    "move_time_seconds": 0.25,
+    "threads": 1,
+    "hash_mb": 32
+  },
   "accounts": [{
     "id": "disclosed-chess-bot-1",
     "storage_state": "sessions/disclosed-chess-bot-1.storage.json",
@@ -13,8 +19,10 @@
   "selectors": {
     "authenticated": "#playerApp:not(.hidden)",
     "logged_out": "#authLanding:not(.hidden)",
-    "chess_view": "[data-start='chess']",
-    "chess_matchmaking": "[data-match='chess']",
+    "chess_view": "[data-find-player='chess'], [data-start='chess']",
+    "chess_matchmaking": "[data-find-player='chess'], [data-match='chess']",
+    "match_stake_modal": "#matchStakeModal",
+    "match_stake_choices": "#matchStakeChoices",
     "board_square": "#chessBoard > .chess-square",
     "piece": ".chess-piece",
     "turn_indicator": "#chessStatus",

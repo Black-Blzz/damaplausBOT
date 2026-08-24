@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fleet Console</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <div>
+      <h1 id="greeting">Fleet Console</h1>
+      <p class="brand-sub" id="greetSub">damaplus.online</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="feed" id="feed">
+      <span class="feed-dot" aria-hidden="true"></span>
+      <span id="feedLabel">connecting</span>
+    </div>
+    <button class="btn btn-danger" id="stopAll" type="button">Stop all bots</button>
+    <button class="btn btn-quiet" id="signOut" type="button">Sign out</button>
+  </div>
+</header>
+
+<div id="alerts" class="alerts" hidden></div>
+
+<section class="strip" aria-label="Fleet summary">
+  <div class="stat">
+    <span class="stat-label">Bots running</span>
+    <span class="stat-value"><b id="statAlive">0</b><em id="statCap">/ 5</em></span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">In a game</span>
+    <span class="stat-value"><b id="statPlaying">0</b></span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Matches played</span>
+    <span class="stat-value"><b id="statMatches">0</b></span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Won / lost / drawn</span>
+    <span class="stat-value mono"><b id="statRecord">0 / 0 / 0</b></span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Fleet wallet</span>
+    <span class="stat-value mono"><b id="statWallet">&mdash;</b><em>birr</em></span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Stakes on offer</span>
+    <span class="stat-value mono"><b id="statStakes">&mdash;</b></span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Console uptime</span>
+    <span class="stat-value mono"><b id="statUptime">0m</b></span>
+  </div>
+</section>
+
+<main class="layout">
+
+  <!-- ── control rail ─────────────────────────────────────────── -->
+  <div class="rail">
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Inject bots</h2>
+      </div>
+      <div class="panel-body form">
+        <label class="field">
+          <span>Game</span>
+          <select id="fGame"></select>
+        </label>
+
+        <label class="field">
+          <span>Stake</span>
+          <select id="fStake"></select>
+        </label>
+
+        <label class="field">
+          <span>How many <em id="fCountVal" class="mono">1</em></span>
+          <input type="range" id="fCount" min="1" max="5" step="1" value="1">
+        </label>
+
+        <label class="field">
+          <span>Seconds between each <em id="fStaggerVal" class="mono">2.0</em></span>
+          <input type="range" id="fStagger" min="0" max="10" step="0.5" value="2">
+        </label>
+
+        <label class="field">
+          <span>Stop below <em class="mono">birr</em></span>
+          <input type="number" id="fMinBalance" min="0" step="1" value="10" class="mono">
+        </label>
+
+        <label class="toggle">
+          <input type="checkbox" id="fOddGate" checked>
+          <span class="toggle-track" aria-hidden="true"><span class="toggle-knob"></span></span>
+          <span class="toggle-text">
+            <b>Only join an odd queue</b>
+            <em>Waits for an unpaired player, and lets one bot in at a time so they never face each other.</em>
+          </span>
+        </label>
+
+        <div class="readout" id="readout"></div>
+
+        <button class="btn btn-primary btn-wide" id="inject" type="button">Inject</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Accounts</h2>
+        <span class="count" id="accountCount">0</span>
+      </div>
+      <div class="panel-body">
+        <ul class="accounts" id="accounts"></ul>
+
+        <details class="adder" id="adder">
+          <summary>Add an account</summary>
+          <div class="form">
+            <label class="field">
+              <span>Game</span>
+              <select id="aGame"></select>
+            </label>
+            <label class="field">
+              <span>Name it</span>
+              <input type="text" id="aName" placeholder="xo-bot-2" autocomplete="off">
+            </label>
+            <label class="field">
+              <span>Phone</span>
+              <input type="tel" id="aPhone" placeholder="09XXXXXXXX" autocomplete="off">
+            </label>
+            <label class="field">
+              <span>Proxy <em>optional, gets around IP rate limits</em></span>
+              <input type="text" id="aProxy" placeholder="http://1.2.3.4:8080" autocomplete="off">
+            </label>
+            <button class="btn btn-wide" id="sendCode" type="button">Send code</button>
+
+            <label class="field">
+              <span>Code from SMS</span>
+              <input type="text" id="aCode" maxlength="6" inputmode="numeric" class="mono" placeholder="000000" autocomplete="off">
+            </label>
+            <button class="btn btn-primary btn-wide" id="verifyCode" type="button">Verify and save</button>
+            <div class="notice" id="authNotice" hidden></div>
+          </div>
+        </details>
+      </div>
+    </section>
+  </div>
+
+  <!-- ── monitoring column ────────────────────────────────────── -->
+  <div class="column">
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Tables</h2>
+        <p class="panel-note">A bot may enter only when an odd number of players is waiting &mdash; the odd one out has nobody to play.</p>
+      </div>
+      <div class="panel-body scroll-x">
+        <table class="grid" id="tables">
+          <thead>
+            <tr>
+              <th>Game</th>
+              <th class="num">Stake</th>
+              <th class="num">Online</th>
+              <th class="num">Ours</th>
+              <th class="num">Waiting</th>
+              <th>Entry</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Bots</h2>
+        <button class="btn btn-quiet" id="prune" type="button">Clear stopped</button>
+      </div>
+      <div class="panel-body scroll-x">
+        <table class="grid" id="fleet">
+          <thead>
+            <tr>
+              <th>Account</th>
+              <th>Game</th>
+              <th class="num">Stake</th>
+              <th>Doing</th>
+              <th class="num">Wallet</th>
+              <th class="num">Moves</th>
+              <th class="num">W&nbsp;/&nbsp;L&nbsp;/&nbsp;D</th>
+              <th class="num">Up</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p class="empty" id="fleetEmpty">No bots running. Inject one from the left.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Activity</h2>
+        <label class="follow">
+          <input type="checkbox" id="follow" checked>
+          <span>Follow</span>
+        </label>
+      </div>
+      <div class="panel-body">
+        <div class="log" id="log" role="log" aria-live="polite"></div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

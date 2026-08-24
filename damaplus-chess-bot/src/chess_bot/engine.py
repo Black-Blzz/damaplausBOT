@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import random
+from pathlib import Path
 
 import chess
+import chess.engine
 
 VALUES = {chess.PAWN: 100, chess.KNIGHT: 320, chess.BISHOP: 330, chess.ROOK: 500, chess.QUEEN: 900, chess.KING: 0}
 
@@ -65,3 +67,22 @@ def choose_move(board: chess.Board, depth: int = 3, elo: int = 1000) -> chess.Mo
         if value > score:
             best, score = move, value
     return best
+
+
+def choose_stockfish_move(
+    board: chess.Board, executable: Path, move_time_seconds: float, threads: int, hash_mb: int,
+) -> chess.Move:
+    """Choose a legal move with a locally installed Stockfish UCI engine."""
+    if not executable.is_file():
+        raise FileNotFoundError(f"Stockfish executable not found: {executable}")
+    with chess.engine.SimpleEngine.popen_uci(str(executable)) as engine:
+        engine.configure({
+            "Threads": max(1, threads),
+            "Hash": max(16, hash_mb),
+            "UCI_LimitStrength": "true",
+            "Skill Level": 2,
+        })
+        result = engine.play(board, chess.engine.Limit(time=max(0.1, move_time_seconds)))
+    if result.move is None:
+        raise ValueError("Stockfish returned no legal move")
+    return result.move

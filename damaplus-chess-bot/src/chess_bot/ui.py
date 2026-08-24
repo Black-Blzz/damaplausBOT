@@ -8,7 +8,13 @@ from dataclasses import dataclass
 import chess
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
+from botkit.matchmaking import EntryResult, join_match
+
 from .settings import Settings
+
+
+# The identifier the site uses for this game in its lobby API.
+GAME = "chess"
 
 
 class UIChanged(RuntimeError):
@@ -32,13 +38,29 @@ class ChessPage:
         self.page, self.settings = page, settings
         self.bot_color: chess.Color | None = None
         self.board: chess.Board | None = None
+        self.last_status_text = ""
+        self.last_move: tuple[int, int] | None = None
 
-    async def queue(self) -> None:
-        self.bot_color, self.board = None, None
-        await self.page.goto(self.settings.base_url, wait_until="domcontentloaded")
-        # The Home button both opens Chess and creates/joins the app's queue.
-        # The in-view Create/Join button is hidden after this transition.
-        await self._click("chess_view", 12_000)
+    async def queue(self, stake: int, odd_only: bool, control, log, min_balance: float = 10.0) -> EntryResult:
+        """Join matchmaking at ``stake``.
+
+        A fresh match can hand us a different side, so nothing about the
+        previous game is carried over.
+        """
+        self.bot_color = None
+        self.board = None
+        return await join_match(
+            self.page,
+            base_url=self.settings.base_url,
+            matchmaking_selector=self.settings.selectors["chess_view"],
+            game=GAME,
+            stake=stake,
+            control=control,
+            odd_only=odd_only,
+            action_delay_ms=self.settings.action_delay_ms,
+            log=log,
+            min_balance=min_balance,
+        )
 
     async def wait_for_match(self, timeout_seconds: float = 60.0) -> bool:
         deadline = asyncio.get_running_loop().time() + timeout_seconds
@@ -55,27 +77,37 @@ class ChessPage:
     async def status(self) -> GameStatus:
         text = (await self.page.locator(self.settings.selectors["turn_indicator"]).first.text_content() or "").strip()
         normalized = text.lower()
+        self.last_status_text = " ".join(normalized.split())
         if any(word in normalized for word in ("won", "lost", "draw", "resigned")):
             return GameStatus(None, False, True, text)
 
-        your_turn = re.search(r"your turn as\s+(white|black)", normalized)
-        opponent_turn = re.search(r"opponent turn(?:\s+as)?\s+(white|black)", normalized)
-        colour = (your_turn or opponent_turn)
-        if colour:
-            self.bot_color = chess.WHITE if colour.group(1) == "white" else chess.BLACK
+        # The live UI varies punctuation and layout (for example, "Your turn
+        # (Black)"). Identify the turn owner and colour independently instead
+        # of requiring one exact sentence.
+        your_turn = "your turn" in normalized
+        opponent_turn = "opponent turn" in normalized or "opponent's turn" in normalized or "opponent’s turn" in normalized
+        colour = re.search(r"\b(white|black)\b", normalized)
+        if colour and (your_turn or opponent_turn):
+            colour_name = colour.group(1)
+            self.bot_color = chess.WHITE if colour_name == "white" else chess.BLACK
         if self.bot_color is None:
             return GameStatus(None, False, False)
 
         snapshot = await self._read_board()
+        # The UI status is authoritative for whose turn it is. A board snapshot
+        # carries piece locations, not a turn marker.
+        snapshot.turn = self.bot_color if your_turn else not self.bot_color
         if self.board is None:
             self.board = chess.Board()
             self.board.turn = self.bot_color if your_turn else not self.bot_color
             if self._placement(self.board) != self._placement(snapshot):
-                # Late attachment or a UI reload: safely rebuild the position.
+                # A reload loses history. Do not infer castling from the king and
+                # rook still occupying their original squares.
+                snapshot.castling_rights = 0
                 self.board = snapshot
         else:
             self._synchronise(snapshot)
-        return GameStatus(self.board.copy(stack=True), bool(your_turn), False)
+        return GameStatus(self.board.copy(stack=True), your_turn, False)
 
     async def play(self, move: chess.Move) -> None:
         if self.board is None:
@@ -102,31 +134,91 @@ class ChessPage:
         self.bot_color, self.board = None, None
 
     async def return_home(self) -> None:
-        if await self.page.locator(self.settings.selectors["return_home"]).count():
-            await self._click("return_home", 5_000)
+        home = self.page.locator(self.settings.selectors["return_home"]).first
+        try:
+            if await home.count():
+                await home.click(timeout=5_000)
+                await self._human_delay()
+                return
+        except PlaywrightTimeoutError:
+            pass
+        await self.page.goto(self.settings.base_url, wait_until="domcontentloaded")
+        await self._human_delay()
 
     async def _read_board(self) -> chess.Board:
-        squares = self.page.locator(self.settings.selectors["board_square"])
-        if await squares.count() != 64:
+        """Rebuild the live position, and note the opponent's last move.
+
+        Read in one page evaluation rather than 64 locator round-trips, which
+        matters when several bots poll a couple of times a second.
+        """
+        cells = await self.page.locator(self.settings.selectors["board_square"]).evaluate_all(
+            """(nodes, pieceSelector) => nodes.map((node) => {
+                 const piece = node.querySelector(pieceSelector);
+                 return [node.className || "", piece ? (piece.className || "") : null];
+               })""",
+            self.settings.selectors["piece"],
+        )
+        if len(cells) != 64:
             raise UIChanged("Chess board does not contain 64 squares")
+
         board = chess.Board(None)
-        # The frontend renders rank 8 to 1 when White plays, and reverses all 64
-        # cells when Black plays.
-        for visual in range(64):
-            piece = squares.nth(visual).locator(self.settings.selectors["piece"]).first
-            if not await piece.count():
+        last_from = last_to = None
+        for visual, (square_classes, piece_classes) in enumerate(cells):
+            square = self._square_from_visual(visual)
+            marks = square_classes.lower().split()
+            if "opponent-last-from" in marks:
+                last_from = square
+            if "opponent-last-to" in marks:
+                last_to = square
+            if piece_classes is None:
                 continue
-            classes = (await piece.get_attribute("class") or "").lower().split()
+            classes = piece_classes.lower().split()
             color = chess.WHITE if "white" in classes else chess.BLACK if "black" in classes else None
             kind = next((PIECES[name] for name in PIECES if f"type-{name}" in classes), None)
             if color is None or kind is None:
                 raise UIChanged(f"unrecognised Chess piece classes: {classes}")
-            app_index = 63 - visual if self.bot_color == chess.BLACK else visual
-            square = 56 - 8 * (app_index // 8) + app_index % 8
             board.set_piece_at(square, chess.Piece(kind, color))
-        board.turn = self.bot_color or chess.WHITE
-        board.castling_rights = self._possible_castling_rights(board)
+
+        # chess.BLACK is the boolean value False, so ``or chess.WHITE`` would
+        # silently turn every reconstructed Black position into White-to-move.
+        board.turn = self.bot_color if self.bot_color is not None else chess.WHITE
+        # Square contents cannot prove that the king and rook have never moved.
+        # Rights are retained only while the bot's move history is intact.
+        board.castling_rights = 0
+        self.last_move = (last_from, last_to) if last_from is not None and last_to is not None else None
+        self._apply_en_passant(board)
         return board
+
+    def _square_from_visual(self, visual: int) -> int:
+        """Map a rendered cell index to a board square.
+
+        The frontend draws rank 8 to 1 for White and reverses all 64 cells for
+        Black.
+        """
+        app_index = 63 - visual if self.bot_color == chess.BLACK else visual
+        return 56 - 8 * (app_index // 8) + app_index % 8
+
+    def _apply_en_passant(self, board: chess.Board) -> None:
+        """Restore the en-passant square from the opponent's last move.
+
+        The site plays full rules including en passant, but a position rebuilt
+        from piece placement alone cannot show it -- the capture is only legal
+        on the move straight after a two-square pawn advance.  The board marks
+        that advance, so read it back rather than losing the right.
+        """
+        if self.last_move is None:
+            return
+        origin, target = self.last_move
+        piece = board.piece_at(target)
+        if piece is None or piece.piece_type != chess.PAWN:
+            return
+        if chess.square_file(origin) != chess.square_file(target):
+            return
+        if abs(chess.square_rank(target) - chess.square_rank(origin)) != 2:
+            return
+        skipped = (origin + target) // 2
+        # python-chess only offers the capture when a pawn can actually take.
+        board.ep_square = skipped
 
     def _synchronise(self, snapshot: chess.Board) -> None:
         assert self.board is not None
@@ -139,29 +231,27 @@ class ChessPage:
             self.board.pop()
             if matched:
                 candidates.append(move)
+
+        # The board marks which squares the opponent just moved between, which
+        # settles the cases placement alone cannot -- most importantly a capture
+        # en passant, where the pawn that disappears is not on the target square.
+        if len(candidates) > 1 and self.last_move is not None:
+            origin, target = self.last_move
+            exact = [m for m in candidates if m.from_square == origin and m.to_square == target]
+            if exact:
+                candidates = exact
+
         if len(candidates) == 1:
             self.board.push(candidates[0])
             return
-        # A reload or an unexpected UI update lost move history; retain the exact
-        # pieces and disable unknown historical rights rather than clicking stale moves.
-        snapshot.turn = self.bot_color if self.board.turn != self.bot_color else not self.bot_color
-        snapshot.castling_rights = 0
+        # A reload or an unexpected UI update lost move history; keep the exact
+        # pieces and drop unknown historical rights rather than clicking stale
+        # moves.  The snapshot already carries any en-passant square it can see.
         self.board = snapshot
 
     @staticmethod
     def _placement(board: chess.Board) -> str:
         return board.board_fen()
-
-    @staticmethod
-    def _possible_castling_rights(board: chess.Board) -> chess.Bitboard:
-        rights = chess.BB_EMPTY
-        if board.piece_at(chess.E1) == chess.Piece(chess.KING, chess.WHITE):
-            if board.piece_at(chess.H1) == chess.Piece(chess.ROOK, chess.WHITE): rights |= chess.BB_H1
-            if board.piece_at(chess.A1) == chess.Piece(chess.ROOK, chess.WHITE): rights |= chess.BB_A1
-        if board.piece_at(chess.E8) == chess.Piece(chess.KING, chess.BLACK):
-            if board.piece_at(chess.H8) == chess.Piece(chess.ROOK, chess.BLACK): rights |= chess.BB_H8
-            if board.piece_at(chess.A8) == chess.Piece(chess.ROOK, chess.BLACK): rights |= chess.BB_A8
-        return rights
 
     async def _click_square(self, square: chess.Square) -> None:
         app_index = (7 - chess.square_rank(square)) * 8 + chess.square_file(square)

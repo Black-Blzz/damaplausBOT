@@ -19,6 +19,10 @@ class Settings:
     action_delay_ms: tuple[int, int]
     search_depth: int
     bot_elo: int
+    stockfish_path: Path | None
+    stockfish_move_time_seconds: float
+    stockfish_threads: int
+    stockfish_hash_mb: int
     account: Account
     selectors: dict[str, str]
 
@@ -31,6 +35,12 @@ class Settings:
             raise ValueError("configure exactly one chess account")
         lo, hi = raw.get("action_delay_ms", [350, 900])
         account = Account(accounts[0]["id"], (source.parent / accounts[0]["storage_state"]).resolve())
-        return cls(raw["base_url"], bool(raw.get("headless", True)), float(raw.get("poll_interval_seconds", 1)),
-                   (int(lo), int(hi)), int(raw.get("search_depth", 2)), int(raw.get("bot_elo", 1000)),
-                   account, raw["selectors"])
+        stockfish = raw.get("stockfish", {})
+        engine_path = stockfish.get("path")
+        return cls(
+            raw["base_url"], bool(raw.get("headless", True)), float(raw.get("poll_interval_seconds", 1)),
+            (int(lo), int(hi)), int(raw.get("search_depth", 2)), int(raw.get("bot_elo", 1000)),
+            (source.parent / engine_path).resolve() if engine_path else None,
+            float(stockfish.get("move_time_seconds", 2.0)), int(stockfish.get("threads", 2)),
+            int(stockfish.get("hash_mb", 256)), account, raw["selectors"],
+        )
