@@ -34,6 +34,11 @@ LOG_CAPACITY = 400
 
 PUBLIC_PATHS = {"/login", "/styles.css"}
 
+# Everything the browser needs. Checked at startup so a half-copied deployment
+# is reported once, loudly, instead of turning into a 404 the operator has to
+# guess at.
+PAGE_ASSETS = ("index.html", "login.html", "wallets.html", "app.js", "wallets.js", "styles.css")
+
 CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
@@ -213,9 +218,22 @@ class Handler(BaseHTTPRequestHandler):
         self._send(json.dumps(payload).encode("utf-8"), "application/json", code)
 
     def _static(self, name: str) -> None:
+        root = STATIC_DIR.resolve()
         path = (STATIC_DIR / name).resolve()
-        if not path.is_file() or STATIC_DIR.resolve() not in path.parents:
-            self._json({"error": "not found"}, 404)
+        if root not in path.parents:
+            self._json({"error": f"{name} is not a page asset"}, 404)
+            return
+        if not path.is_file():
+            # Nearly always a deployment that did not copy every file across.
+            self.dashboard.log(
+                f"MISSING PAGE FILE: {name} is not in {root}. "
+                f"Copy the whole dashboard/static folder to this server."
+            )
+            self._json({
+                "error": f"{name} is missing from this deployment. "
+                         f"Copy dashboard/static/{name} to the server and reload.",
+                "missing_file": name,
+            }, 404)
             return
         self._send(path.read_bytes(), CONTENT_TYPES.get(path.suffix, "application/octet-stream"))
 
@@ -299,7 +317,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/state":
             self._json({**board.state(), "user": display_name(self._operator())})
         else:
-            self._json({"error": "not found"}, 404)
+            self._json({"error": f"no such page: {path}"}, 404)
 
     def do_POST(self) -> None:
         path = self.path.split("?")[0]
@@ -442,7 +460,7 @@ class Handler(BaseHTTPRequestHandler):
             ).start()
             self._json({"message": "Verifying..."})
         else:
-            self._json({"error": "not found"}, 404)
+            self._json({"error": f"no such endpoint: {path}"}, 404)
 
 
 def serve(port: int = 8080, host: str = "127.0.0.1", bot_token: str = "") -> None:
@@ -461,6 +479,11 @@ def serve(port: int = 8080, host: str = "127.0.0.1", bot_token: str = "") -> Non
     handler = type("BoundHandler", (Handler,), {"dashboard": board})
     httpd = ThreadingHTTPServer((host, port), handler)
     httpd.daemon_threads = True
+
+    missing = [name for name in PAGE_ASSETS if not (STATIC_DIR / name).is_file()]
+    if missing:
+        board.log(f"MISSING PAGE FILES: {', '.join(missing)} -- copy the whole "
+                  f"dashboard/static folder to this server, or those pages will 404")
 
     snapshot = board.lobby.snapshot()
     board.log(f"console on http://{host}:{port}  (sign-in required)")

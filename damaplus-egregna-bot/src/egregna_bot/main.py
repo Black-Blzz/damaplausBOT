@@ -13,7 +13,8 @@ from .ui import GAME, EgregnaPage
 
 async def play_match(bot: EgregnaPage, settings: Settings, log, reporter) -> str | None:
     """Play one Dama (egregna) game through to its result."""
-    engine = StrongEngine(depth=settings.hard_search_depth)
+    engine = StrongEngine(depth=settings.hard_search_depth,
+                          time_limit_seconds=settings.think_time_seconds)
     # A tier is drawn per match so the bot's strength varies between games
     # rather than within one.
     tier = random.choices(

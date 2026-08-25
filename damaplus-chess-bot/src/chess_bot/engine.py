@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import atexit
 import random
+import threading
 from pathlib import Path
 
 import chess
@@ -69,20 +71,73 @@ def choose_move(board: chess.Board, depth: int = 3, elo: int = 1000) -> chess.Mo
     return best
 
 
+class _StockfishSession:
+    """One long-lived Stockfish process, shared by every move of a game.
+
+    Starting a fresh engine per move cost a process launch and threw away the
+    transposition table each time -- slow, and weaker for the same time budget.
+    """
+
+    def __init__(self) -> None:
+        self._engine: chess.engine.SimpleEngine | None = None
+        self._settings: tuple | None = None
+        self._lock = threading.Lock()
+
+    def engine(self, executable: Path, threads: int, hash_mb: int,
+               skill_level: int) -> chess.engine.SimpleEngine:
+        wanted = (str(executable), threads, hash_mb, skill_level)
+        if self._engine is not None and self._settings == wanted:
+            return self._engine
+        self.close()
+        if not executable.is_file():
+            raise FileNotFoundError(f"Stockfish executable not found: {executable}")
+        engine = chess.engine.SimpleEngine.popen_uci(str(executable))
+        options = {"Threads": max(1, threads), "Hash": max(16, hash_mb)}
+        # Skill Level 20 is Stockfish's full strength; anything lower makes it
+        # play deliberately worse moves.
+        if 0 <= skill_level < 20:
+            options["UCI_LimitStrength"] = False
+            options["Skill Level"] = skill_level
+        engine.configure(options)
+        self._engine, self._settings = engine, wanted
+        return engine
+
+    def close(self) -> None:
+        if self._engine is not None:
+            try:
+                self._engine.quit()
+            except Exception:
+                pass
+        self._engine, self._settings = None, None
+
+
+_SESSION = _StockfishSession()
+
+
+def close_engine() -> None:
+    """Shut the shared Stockfish process down."""
+    _SESSION.close()
+
+
+# Stockfish exits when its stdin closes, but shutting it down explicitly keeps
+# a clean exit clean -- worth having with sixteen bots on one host.
+atexit.register(close_engine)
+
+
 def choose_stockfish_move(
     board: chess.Board, executable: Path, move_time_seconds: float, threads: int, hash_mb: int,
+    skill_level: int = 20,
 ) -> chess.Move:
     """Choose a legal move with a locally installed Stockfish UCI engine."""
-    if not executable.is_file():
-        raise FileNotFoundError(f"Stockfish executable not found: {executable}")
-    with chess.engine.SimpleEngine.popen_uci(str(executable)) as engine:
-        engine.configure({
-            "Threads": max(1, threads),
-            "Hash": max(16, hash_mb),
-            "UCI_LimitStrength": "true",
-            "Skill Level": 2,
-        })
-        result = engine.play(board, chess.engine.Limit(time=max(0.1, move_time_seconds)))
+    with _SESSION._lock:
+        try:
+            engine = _SESSION.engine(executable, threads, hash_mb, skill_level)
+            result = engine.play(board, chess.engine.Limit(time=max(0.05, move_time_seconds)))
+        except (chess.engine.EngineError, chess.engine.EngineTerminatedError, BrokenPipeError):
+            # A crashed engine must not take the bot down with it.
+            _SESSION.close()
+            engine = _SESSION.engine(executable, threads, hash_mb, skill_level)
+            result = engine.play(board, chess.engine.Limit(time=max(0.05, move_time_seconds)))
     if result.move is None:
         raise ValueError("Stockfish returned no legal move")
     return result.move

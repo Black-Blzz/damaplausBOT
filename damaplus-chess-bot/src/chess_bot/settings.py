@@ -23,6 +23,7 @@ class Settings:
     stockfish_move_time_seconds: float
     stockfish_threads: int
     stockfish_hash_mb: int
+    stockfish_skill_level: int
     account: Account
     selectors: dict[str, str]
 
@@ -42,5 +43,6 @@ class Settings:
             (int(lo), int(hi)), int(raw.get("search_depth", 2)), int(raw.get("bot_elo", 1000)),
             (source.parent / engine_path).resolve() if engine_path else None,
             float(stockfish.get("move_time_seconds", 2.0)), int(stockfish.get("threads", 2)),
-            int(stockfish.get("hash_mb", 256)), account, raw["selectors"],
+            int(stockfish.get("hash_mb", 256)),
+            int(stockfish.get("skill_level", 20)), account, raw["selectors"],
         )

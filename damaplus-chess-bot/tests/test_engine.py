@@ -106,6 +106,7 @@ def test_return_home_falls_back_to_base_url_when_button_is_missing():
         stockfish_move_time_seconds=0.25,
         stockfish_threads=1,
         stockfish_hash_mb=32,
+        stockfish_skill_level=20,
         account=Account("test", Path("sessions/test.storage.json")),
         selectors={"return_home": ".nav-item[data-view='home']", "authenticated": "#playerApp:not(.hidden)"},
     )

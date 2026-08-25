@@ -15,10 +15,18 @@ def winner(board: tuple[str, ...]) -> str | None:
 
 
 @lru_cache(maxsize=None)
-def _score(board: tuple[str, ...], turn: str, bot: str) -> int:
+def _score(board: tuple[str, ...], turn: str, bot: str, depth: int = 0) -> int:
+    """Minimax value of a position, counting how soon the result arrives.
+
+    Scoring a win as ``10 - depth`` makes the bot take the shortest win and,
+    when it is losing, the longest defence.  An earlier version nudged internal
+    nodes by one instead, which cancelled out: a mate-in-one and a mate-in-five
+    scored identically, so the bot would play the centre rather than complete a
+    line it had already won.
+    """
     won = winner(board)
     if won:
-        return 10 if won == bot else -10
+        return (10 - depth) if won == bot else (depth - 10)
     empty = [index for index in ORDER if not board[index]]
     if not empty:
         return 0
@@ -26,8 +34,8 @@ def _score(board: tuple[str, ...], turn: str, bot: str) -> int:
     for index in empty:
         next_board = list(board)
         next_board[index] = turn
-        values.append(_score(tuple(next_board), "O" if turn == "X" else "X", bot))
-    return (max(values) - 1) if turn == bot else (min(values) + 1)
+        values.append(_score(tuple(next_board), "O" if turn == "X" else "X", bot, depth + 1))
+    return max(values) if turn == bot else min(values)
 
 
 def choose_move(
@@ -36,11 +44,13 @@ def choose_move(
     mistake_rate: float = 0.0,
     rng: random.Random | None = None,
 ) -> int:
-    """Choose a move, occasionally preferring a non-optimal legal move.
+    """Choose a move by full minimax over the whole game tree.
 
-    ``mistake_rate`` is the chance (from 0 to 1) to select a move with a
-    worse minimax score. This keeps the bot capable of normal play while
-    giving an opponent opportunities to create winning forks.
+    At the default ``mistake_rate`` of 0 the bot plays perfectly, and since
+    tic-tac-toe is a solved game that means it cannot lose -- the worst
+    available result is a draw.  A non-zero rate deliberately picks a
+    worse-scoring move, which hands the opponent real chances; the shipped
+    config asks for zero.
     """
     if not 0.0 <= mistake_rate <= 1.0:
         raise ValueError("mistake_rate must be between 0 and 1")
@@ -52,6 +62,7 @@ def choose_move(
             tuple(bot_mark if i == index else value for i, value in enumerate(board)),
             "O" if bot_mark == "X" else "X",
             bot_mark,
+            1,
         )
         for index in options
     }

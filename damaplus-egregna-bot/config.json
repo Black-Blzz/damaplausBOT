@@ -1,0 +1,44 @@
+{
+  "base_url": "https://damaplus.online/",
+  "headless": true,
+  "poll_interval_seconds": 0.4,
+  "action_delay_ms": [
+    30,
+    90
+  ],
+  "difficulty_weights": {
+    "hard": 1.0
+  },
+  "hard_search_depth": 12,
+  "accounts": [
+    {
+      "id": "disclosed-egregna-bot-1",
+      "storage_state": "sessions/disclosed-egregna-bot-1.storage.json",
+      "variant": "egregna"
+    }
+  ],
+  "selectors": {
+    "authenticated": "#playerApp:not(.hidden)",
+    "logged_out": "#authLanding:not(.hidden)",
+    "egregna_matchmaking": "[data-find-player='dama-egregna'], [data-start='dama-egregna']",
+    "match_stake_modal": "#matchStakeModal",
+    "match_stake_choices": "#matchStakeChoices",
+    "match_found": "#damaBoard",
+    "board_square": "#damaBoard > .square",
+    "piece": ".piece",
+    "start_notice": "#damaStartNotice",
+    "turn_indicator": "#damaStatus",
+    "game_over": "#damaStatus",
+    "return_home": ".nav-item[data-view='home']"
+  },
+  "attributes": {
+    "square": "data-square",
+    "piece_color": "data-piece-color",
+    "piece_king": "data-is-king",
+    "bot_color": "data-player-color",
+    "turn": "data-player",
+    "result": "data-result",
+    "ui_mode": "damaplus"
+  },
+  "think_time_seconds": 2.0
+}

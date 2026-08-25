@@ -4,7 +4,7 @@ import asyncio
 
 from botkit.runner import build_parser, run_bot
 
-from .engine import choose_stockfish_move
+from .engine import choose_stockfish_move, close_engine
 from .session import SessionInvalid, open_authenticated_context
 from .settings import Settings
 from .ui import GAME, ChessPage, UIChanged
@@ -44,6 +44,7 @@ async def play_match(bot: ChessPage, settings: Settings, log, reporter) -> str |
                     settings.stockfish_move_time_seconds,
                     settings.stockfish_threads,
                     settings.stockfish_hash_mb,
+                    settings.stockfish_skill_level,
                 )
             except ValueError as error:
                 log.warning("no playable move in this position; reloading: %s", error)
@@ -65,16 +66,19 @@ async def play_match(bot: ChessPage, settings: Settings, log, reporter) -> str |
 def main() -> None:
     args = build_parser("DamaPlus Chess bot").parse_args()
     settings = Settings.load(args.config)
-    asyncio.run(run_bot(
-        args=args,
-        settings=settings,
-        account=settings.account,
-        game=GAME,
-        make_bot=ChessPage,
-        play_match=play_match,
-        open_context=open_authenticated_context,
-        session_invalid=SessionInvalid,
-    ))
+    try:
+        asyncio.run(run_bot(
+            args=args,
+            settings=settings,
+            account=settings.account,
+            game=GAME,
+            make_bot=ChessPage,
+            play_match=play_match,
+            open_context=open_authenticated_context,
+            session_invalid=SessionInvalid,
+        ))
+    finally:
+        close_engine()
 
 
 if __name__ == "__main__":

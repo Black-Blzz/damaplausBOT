@@ -189,6 +189,36 @@ the word alone scores losses as wins. `botkit/results.py` decides from the
 subject of the sentence instead, and anything it cannot read confidently is
 counted as `unknown` rather than guessed at.
 
+## Strength
+
+| Bot | Setting | Notes |
+| --- | --- | --- |
+| Dama tankegna | `hard`, depth 12, 2.0s/move | Iterative-deepening negamax with alpha-beta |
+| Dama egregna | `hard`, depth 12, 2.0s/move | Same engine, egregna rules |
+| XO | `mistake_rate: 0.0` | Full minimax; tic-tac-toe is solved, so it cannot lose |
+| Chess | Stockfish skill 20, 1.0s/move, 2 threads, 256 MB | No strength cap |
+
+`hard` beat both weaker dama tiers in 16 of 16 self-play games, from both sides.
+
+XO cannot lose, and that is proved rather than asserted:
+`damaplus-xo-bot/tests/test_never_loses.py` walks the *entire* game tree with the
+opponent free to play every legal reply, from both marks, and asserts no line
+ends in a loss.
+
+Chess previously ran at **Skill Level 2 of 20** with `UCI_LimitStrength` on, and
+started a fresh Stockfish process for every single move. It now runs uncapped and
+keeps one engine alive per bot, which is both stronger and roughly five times
+faster per move.
+
+### Speed
+
+`action_delay_ms` was `[350, 900]` — up to nine tenths of a second of deliberate
+hesitation per click. XO now clicks instantly (`[0, 0]`); the others keep a
+30–90 ms gap, which is imperceptible but gives the site's frontend a tick to
+process the first click of a two-click move. `poll_interval_seconds` dropped from
+1–2s to 0.3–0.4s, so a bot notices the opponent's move far sooner — that was the
+larger share of the delay you could see.
+
 ## Chess
 
 The bot keeps a real `chess.Board` with move history, so castling and en passant

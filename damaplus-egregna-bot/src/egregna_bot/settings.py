@@ -20,6 +20,7 @@ class Settings:
     action_delay_ms: tuple[int, int]
     difficulty_weights: dict[str, float]
     hard_search_depth: int
+    think_time_seconds: float
     accounts: tuple[Account, ...]
     selectors: dict[str, str]
     attributes: dict[str, str]
@@ -34,5 +35,6 @@ class Settings:
             raise ValueError("this bot permits exactly one Egregna account")
         lo, hi = raw["action_delay_ms"]
         return cls(raw["base_url"], raw.get("headless", True), raw.get("poll_interval_seconds", 2.0),
-                   (int(lo), int(hi)), raw["difficulty_weights"], int(raw.get("hard_search_depth", 7)),
+                   (int(lo), int(hi)), raw["difficulty_weights"], int(raw.get("hard_search_depth", 12)),
+                   float(raw.get("think_time_seconds", 2.0)),
                    accounts, raw["selectors"], raw["attributes"])
