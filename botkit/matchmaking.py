@@ -30,6 +30,14 @@ SWITCH_OVERLAY = "#gameSwitchOverlay"
 
 # How long to keep asking the coordinator before giving up on this attempt.
 PERMIT_WAIT_SECONDS = 120.0
+# Heartbeat cadence while queuing.  Comfortably inside the coordinator's
+# LEASE_TIMEOUT_SECONDS so an ordinary slow poll never drops the lease.
+RENEW_SECONDS = 5.0
+# The site prints this in the start-notice element while nobody has joined yet.
+WAITING_NOTICE = "waiting for opponent"
+# Toast the site shows on pairing: "XO started vs <name>".
+STARTED_VS = re.compile(r"started vs\s+(.+?)\s*$", re.IGNORECASE)
+PHONE_TAIL = re.compile(r"\*+(\d{2,4})")
 
 
 class Entry(Enum):
@@ -40,6 +48,7 @@ class Entry(Enum):
     NOT_PERMITTED = "not_permitted"          # coordinator said no within the budget
     UI_UNAVAILABLE = "ui_unavailable"        # chooser never appeared
     LOW_BALANCE = "low_balance"              # not enough money to stake
+    WAITING_TURN = "waiting_turn"            # another of our bots holds this table
 
 
 class EntryResult:
@@ -213,6 +222,96 @@ async def _clear_to_enter(page, game, stake, control, log) -> EntryResult | None
         return None
 
     if not permit.granted:
-        return EntryResult(Entry.NOT_PERMITTED, detail=permit.reason)
+        kind = Entry.WAITING_TURN if permit.waiting_turn else Entry.NOT_PERMITTED
+        return EntryResult(kind, detail=permit.reason)
     log.info("entry permitted: %s", permit.reason)
     return EntryResult(Entry.JOINED, permit.token, permit.reason)
+
+async def queue_state(page, start_notice_selector: str, turn_selector: str) -> str:
+    """Where this bot stands right now: waiting, playing, or finished.
+
+    Read rather than inferred.  While nobody has joined, the site writes
+    "Waiting for opponent to join." into the start-notice element, which is a
+    far more reliable signal than guessing from the turn indicator.
+    """
+    try:
+        notice = ""
+        if start_notice_selector:
+            node = page.locator(start_notice_selector).first
+            if await node.count():
+                notice = (await node.text_content() or "").strip().lower()
+        if WAITING_NOTICE in notice:
+            return "waiting"
+
+        status = page.locator(turn_selector).first
+        text = (await status.text_content() or "").strip().lower() if await status.count() else ""
+    except Exception:
+        return "unknown"
+
+    if any(word in text for word in ("won", "lost", "draw", "resigned")):
+        return "finished"
+    if "your turn" in text or "opponent turn" in text or "opponent's turn" in text:
+        return "playing"
+    if "waiting" in text:
+        return "waiting"
+    return "unknown"
+
+
+async def read_opponent(page) -> tuple[str, str]:
+    """Who the site says we are playing: (display name, phone tail).
+
+    The site announces the pairing in a toast -- "XO started vs ****1234" --
+    where the name is either the opponent's chosen display name or a masked
+    phone.  Either is enough to recognise one of our own accounts.
+    """
+    try:
+        toast = page.locator("#toast").first
+        text = (await toast.text_content() or "").strip() if await toast.count() else ""
+    except Exception:
+        return "", ""
+    match = STARTED_VS.search(text)
+    if not match:
+        return "", ""
+    name = match.group(1).strip()
+    tail = PHONE_TAIL.search(name)
+    return name, (tail.group(1) if tail else "")
+
+
+async def wait_until_paired(
+    page,
+    *,
+    start_notice_selector: str,
+    turn_selector: str,
+    control,
+    token: str,
+    timeout_seconds: float,
+    log,
+) -> bool:
+    """Sit in the queue until someone joins, holding the table lease open.
+
+    Returns True once we are in a game.  Returns False if the queue window runs
+    out, the game ended before it began, or the coordinator withdrew the lease --
+    in which case we must stop queuing rather than risk a second bot entering.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_seconds
+    next_renew = loop.time()
+
+    while loop.time() < deadline:
+        state = await queue_state(page, start_notice_selector, turn_selector)
+        if state == "playing":
+            return True
+        if state == "finished":
+            log.info("the game ended before it started")
+            return False
+
+        if token and loop.time() >= next_renew:
+            if not await control.renew(token):
+                log.warning("lost our place on this table; leaving the queue")
+                return False
+            next_renew = loop.time() + RENEW_SECONDS
+
+        await asyncio.sleep(1.0)
+
+    log.info("nobody joined inside the queue window")
+    return False

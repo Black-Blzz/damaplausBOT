@@ -43,9 +43,18 @@ def scan_sessions() -> tuple[dict[str, list[dict]], list[str]]:
                 account_id = path.name[: -len(".storage.json")]
                 if code in {"expired", "invalid"}:
                     warnings.append(f"{cfg['name']}: session for '{account_id}' is unusable ({label}).")
+                meta = {}
+                try:
+                    meta = json.loads(
+                        path.with_name(path.name.replace(".storage.json", ".meta.json"))
+                        .read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    pass
                 found.append({
                     "account_id": account_id,
                     "path": str(path),
+                    "display_name": str(meta.get("display_name") or ""),
+                    "phone_tail": str(meta.get("phone_tail") or ""),
                     "status": code,
                     "status_label": label,
                     "modified": time.strftime("%Y-%m-%d %H:%M", time.localtime(path.stat().st_mtime)),
@@ -114,26 +123,82 @@ class Fleet:
         return rows
 
     # -- launching -------------------------------------------------------
-    def plan_launch(self, variant: str, stake: int, count: int) -> tuple[list[dict], str | None]:
-        """Pick one distinct session per bot, or explain why we cannot."""
+    def session_path(self, variant: str, account_id: str) -> Path | None:
+        """Resolve an account to its session file, refusing anything outside.
+
+        ``account_id`` arrives from the browser, so a name like ``../../x`` must
+        not be able to reach a file elsewhere on disk.
+        """
+        directory = (BOT_VARIANTS[variant]["cwd"] / "sessions").resolve()
+        path = (directory / f"{account_id}.storage.json").resolve()
+        return path if path.parent == directory else None
+
+    def running_on(self, variant: str, account_id: str) -> bool:
+        with self._lock:
+            return any(bot.alive and bot.variant == variant and bot.account_id == account_id
+                       for bot in self._bots.values())
+
+    def delete_session(self, variant: str, account_id: str) -> str:
+        """Remove a saved sign-in. Returns an error message, or "" on success."""
+        if variant not in BOT_VARIANTS:
+            return f"Unknown game '{variant}'."
+        if self.running_on(variant, account_id):
+            return f"'{account_id}' is running a bot right now. Stop it first."
+        path = self.session_path(variant, account_id)
+        if path is None or not path.is_file():
+            return f"There is no saved session for '{account_id}'."
+        try:
+            path.unlink()
+            path.with_name(path.name.replace(".storage.json", ".meta.json")).unlink(missing_ok=True)
+        except OSError as error:
+            return f"Could not delete '{account_id}': {error}"
+        self._log(f"deleted the saved session for '{account_id}' ({BOT_VARIANTS[variant]['name']})")
+        return ""
+
+    def plan_launch(self, variant: str, stake: int, count: int,
+                    accounts: list[str] | None = None) -> tuple[list[dict], str | None]:
+        """Pick the sessions to run, or explain why we cannot.
+
+        Named accounts are used exactly as given; otherwise free ones are taken
+        in order.  Either way each bot gets its own login -- two bots sharing a
+        session fight over it.
+        """
         cfg = BOT_VARIANTS[variant]
         sessions, _ = scan_sessions()
-        usable = [s for s in sessions.get(variant, []) if s["usable"]]
-        busy = {bot.account_id for bot in self._bots.values() if bot.alive and bot.variant == variant}
-        free = [s for s in usable if s["account_id"] not in busy]
-
-        if not usable:
-            return [], (
-                f"No usable session for {cfg['name']}. Add an account below "
-                f"(Send OTP) before injecting bots."
-            )
-        if len(free) < count:
-            return [], (
-                f"Only {len(free)} free session(s) for {cfg['name']} but {count} bot(s) requested. "
-                f"Each bot needs its own account, otherwise they share one login and fight over it. "
-                f"Authenticate {count - len(free)} more account(s) or lower the count."
-            )
+        available = sessions.get(variant, [])
+        with self._lock:
+            busy = {bot.account_id for bot in self._bots.values()
+                    if bot.alive and bot.variant == variant}
         room = MAX_BOTS - self.alive_count()
+
+        if accounts:
+            by_id = {entry["account_id"]: entry for entry in available}
+            chosen: list[dict] = []
+            for account_id in dict.fromkeys(accounts):  # de-duplicate, keep order
+                entry = by_id.get(account_id)
+                if entry is None:
+                    return [], f"There is no session called '{account_id}' for {cfg['name']}."
+                if not entry["usable"]:
+                    return [], (f"'{account_id}' cannot sign in ({entry['status_label']}). "
+                                f"Re-authenticate it before injecting.")
+                if account_id in busy:
+                    return [], f"'{account_id}' is already running a bot."
+                chosen.append(entry)
+            if len(chosen) > room:
+                return [], (f"Fleet limit is {MAX_BOTS} bots; only {max(0, room)} slot(s) free "
+                            f"but {len(chosen)} account(s) selected.")
+            return chosen, None
+
+        usable = [entry for entry in available if entry["usable"]]
+        free = [entry for entry in usable if entry["account_id"] not in busy]
+        if not usable:
+            return [], (f"No usable session for {cfg['name']}. Add an account below "
+                        f"before injecting bots.")
+        if len(free) < count:
+            return [], (f"Only {len(free)} free session(s) for {cfg['name']} but {count} bot(s) "
+                        f"requested. Each bot needs its own account, otherwise they share one "
+                        f"login and fight over it. Authenticate "
+                        f"{count - len(free)} more, or lower the count.")
         if count > room:
             return [], f"Fleet limit is {MAX_BOTS} bots; only {max(0, room)} slot(s) free."
         return free[:count], None
@@ -162,6 +227,10 @@ class Fleet:
                 "--min-balance", str(min_balance),
                 "--headless" if headless else "--headed",
             ]
+            if session.get("phone_tail"):
+                command += ["--phone-tail", session["phone_tail"]]
+            if session.get("display_name"):
+                command += ["--display-name", session["display_name"]]
             if token:
                 command += ["--control-token", token]
             try:

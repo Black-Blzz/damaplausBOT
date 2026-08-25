@@ -71,24 +71,63 @@ The site publishes live headcounts at `GET /api/lobby/public`:
 {"stakeOptions": [5, 30], "online": {"chess:5": 1, "dama-tankegna:5": 2, "xo:5": 3}}
 ```
 
-A bot should only join when somebody is sitting unpaired in the queue — that is,
-when the number waiting is **odd**. Left to themselves, five bots all check at
-the same instant, all see odd, all join, and pair with each other. So they don't
-decide: they ask the console, which grants **one entry permit per table at a
-time** and only when the parity is right. A permit expires on its own, so a bot
-that crashes mid-join cannot wedge a table.
+Bots cannot decide this for themselves — sixteen of them all checking "is the
+count odd?" at the same instant would all see odd, all join, and pair up. So
+every bot asks the console, and three layers enforce the answer.
 
-Two details matter for the count to mean anything:
+**1 · One lease per table.** A `(game, stake)` table admits at most one of our
+bots into its queue at a time. The holder renews the lease every 5 seconds and
+only releases it once it is genuinely in a game, so a bot that waits a long
+time can never have the table taken from under it. Stop renewing — crash, hang,
+killed process — and the lease dies in 20 seconds, freeing the table.
 
-- `online` includes our own bots, so queued bots are subtracted before the
-  parity test.
+> This replaced a permit that expired on a fixed 45-second timer while its
+> holder was still legitimately queuing, which handed the same table to a second
+> bot. That is exactly how two bots end up facing each other.
+
+**2 · An odd waiting count.** A bot enters only when an odd number of players
+is waiting, meaning one of them is unpaired and will take our bot as their
+opponent. Two details make the count mean something:
+
+- `online` includes our own bots, so queued ones are subtracted first.
 - A bot that is *playing* is paired with exactly one human. That pair adds 2 to
   the count and cancels out of the parity, as does every human-vs-human game —
   so both halves are subtracted, leaving a number with the same parity as the
   unpaired players. See `dashboard/coordinator.py::_waiting_humans`.
 
-The rule can be switched off from the console, which is the only way bots will
-knowingly face each other.
+**3 · Opponent verification.** Once paired, a bot reads who it is facing from
+the site's own announcement and reports it. The coordinator knows every bot's
+display name and phone last-4, so if the opponent turns out to be one of ours it
+**pauses that table** and raises a critical alert naming both accounts. No
+further bot enters until an operator resumes it. Prevention you cannot verify
+is not worth much; this is how you find out layer 1 failed.
+
+The odd-count rule can be switched off from the console. The lease cannot — bots
+take turns whatever else is configured.
+
+### What taking turns looks like
+
+Two bots on `dama-tankegna:5`. The second shows **Waiting its turn** throughout,
+which is the system working, not a stuck bot:
+
+```
+bot-a  gets the lease, sits in the queue      bot-b  waiting its turn
+bot-a  paired with a human, releases lease    bot-b  waiting (queue now even)
+                                              bot-b  a human arrives -> takes the table
+bot-a  finishes its game, wants to requeue    bot-b  still queuing
+bot-a  waiting its turn                       bot-b  paired
+```
+
+### Who is who
+
+Each account's identity is written beside its session as
+`<account>.meta.json` when it signs in: display name and phone last-4. The
+console passes these to the bot at launch, the bot registers them with the
+coordinator, and that registry is what makes layer 3 possible.
+
+New accounts are given ordinary names (`Abel`, `Meron`, …) chosen
+deterministically per account. Earlier accounts were registered as
+`Bot-<account_id>`, which told every opponent exactly what they were playing.
 
 ## Stakes
 
@@ -122,12 +161,23 @@ enough for several, which is what the console is for.
 
 ## Money
 
-Before every join a bot reads its wallet from the lobby header and refuses to
-enter if the balance is under the floor (10 birr by default) or under the stake
-itself. It says so once in the log, reports `Out of funds` to the console, and
-re-checks every minute — so topping the account up resumes it without a restart.
-The console shows each bot's balance, turns it red under the floor, and raises a
-banner naming the account.
+**Where balances come from.** The console reads every saved account's wallet
+straight from the site with `GET /api/player/session-delta`, using the cookies
+and CSRF token already inside that account's Playwright session file. No browser
+is involved, so it works whether or not a bot is running for that account, and a
+top-up shows up within 90 seconds. The **Wallets** page lists every account with
+its balance, bonus, and whether the site still accepts its session; "Re-check
+now" forces an immediate sweep.
+
+> This used to be read only by a running bot, at the moment it tried to enter a
+> table. Topping an account up showed nothing until that bot next queued, and
+> nothing at all if no bot was running for it.
+
+**Spending guard.** Before every join a bot reads its own wallet from the page
+and refuses to enter if the balance is under the floor (10 birr by default) or
+under the stake itself. It says so once in the log, reports `Out of funds` to
+the console, and re-checks every minute — so topping the account up resumes it
+without a restart.
 
 A balance that cannot be read does **not** stop a bot: the site refuses an
 unfunded join anyway, and halting on a failed read would be the worse error.

@@ -25,6 +25,7 @@
     "match_stake_choices": "#matchStakeChoices",
     "board_square": "#chessBoard > .chess-square",
     "piece": ".chess-piece",
+    "start_notice": "#chessStartNotice",
     "turn_indicator": "#chessStatus",
     "return_home": ".nav-item[data-view='home']"
   }

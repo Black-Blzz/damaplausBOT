@@ -28,6 +28,7 @@ from .config import (
 from .coordinator import Coordinator
 from .lobby import LobbyMonitor
 from .processes import Fleet, scan_sessions
+from .wallets import WalletMonitor
 
 LOG_CAPACITY = 400
 
@@ -56,11 +57,12 @@ class Dashboard:
 
         self.settings = load_settings()
         self.lobby = LobbyMonitor(SITE_URL, on_error=self.log)
-        self.coordinator = Coordinator(self.lobby)
+        self.coordinator = Coordinator(self.lobby, self.log)
         self.coordinator.odd_gate_enabled = bool(self.settings["odd_gate_enabled"])
         self.fleet = Fleet(self.coordinator, self.log)
         self.auth = AuthManager(self.log)
         self.accounts = Accounts(self.log)
+        self.wallets = WalletMonitor(self.log, SITE_URL)
 
     @property
     def control_url(self) -> str:
@@ -80,15 +82,23 @@ class Dashboard:
     def state(self) -> dict:
         bots = self.fleet.snapshot()
         sessions, warnings = scan_sessions()
+        for variant, accounts in sessions.items():
+            for account in accounts:
+                account["balance"] = self.wallets.balance_of(variant, account["account_id"])
         lobby = self.lobby.status()
         if lobby["stale"]:
             warnings.append("Live lobby counts are stale - the site did not answer. Entry gating is paused.")
+        for key, why in self.coordinator.paused_tables().items():
+            warnings.append(f"SELF-PAIR on {key}: {why}. No bot will enter until you resume it.")
         playing = sum(1 for bot in bots if bot["state"] in {"matched", "playing"})
-        wallets = [b["telemetry"].get("balance") for b in bots
-                   if b["telemetry"].get("balance") is not None]
+        wallet_summary = self.wallets.summary()
         floor = float(self.settings.get("min_balance", 10.0))
         for bot in bots:
             money = bot["telemetry"].get("balance")
+            if money is None:
+                money = self.wallets.balance_of(bot["variant"], bot["account_id"])
+                if money is not None:
+                    bot["telemetry"]["balance"] = money
             if money is not None and money < floor and bot["alive"]:
                 warnings.append(
                     f"{bot['account_id']} is down to {money:g} birr (floor {floor:g}) "
@@ -104,6 +114,7 @@ class Dashboard:
             "auth": self.auth.status(),
             "operators": [display_name(name) for name in self.accounts.signed_in()],
             "settings": {**self.settings, "odd_gate_enabled": self.coordinator.odd_gate_enabled},
+            "wallet_summary": wallet_summary,
             "variants": [
                 {"id": key, "name": cfg["name"], "game": cfg["game"]}
                 for key, cfg in BOT_VARIANTS.items()
@@ -117,7 +128,7 @@ class Dashboard:
                 "losses": sum(bot["telemetry"].get("losses", 0) for bot in bots),
                 "draws": sum(bot["telemetry"].get("draws", 0) for bot in bots),
                 "unknown": sum(bot["telemetry"].get("unknown", 0) for bot in bots),
-                "wallet": round(sum(wallets), 2) if wallets else None,
+                "wallet": wallet_summary["total"],
                 "uptime_seconds": int(time.time() - self.started_at),
             },
         }
@@ -134,10 +145,11 @@ class Dashboard:
             offered = ", ".join(str(value) for value in snapshot.stake_options)
             return {"error": f"The site is not offering stake {stake}. Available right now: {offered}."}, 400
 
-        count = max(1, min(int(body.get("count") or 1), MAX_BOTS))
+        picked = [str(a) for a in (body.get("accounts") or []) if str(a).strip()]
+        count = len(picked) or max(1, min(int(body.get("count") or 1), MAX_BOTS))
         stagger = max(0.0, min(float(body.get("stagger_seconds") or 2.0), 15.0))
 
-        sessions, problem = self.fleet.plan_launch(variant, stake, count)
+        sessions, problem = self.fleet.plan_launch(variant, stake, count, picked or None)
         if problem:
             return {"error": problem}, 409
 
@@ -274,8 +286,16 @@ class Handler(BaseHTTPRequestHandler):
 
         if path in ("/", "/index.html"):
             self._static("index.html")
-        elif path == "/app.js":
-            self._static("app.js")
+        elif path in ("/app.js", "/wallets.js"):
+            self._static(path.lstrip("/"))
+        elif path == "/wallets":
+            self._static("wallets.html")
+        elif path == "/api/wallets":
+            self._json({
+                "wallets": board.wallets.rows(),
+                "summary": board.wallets.summary(),
+                "user": display_name(self._operator()),
+            })
         elif path == "/api/state":
             self._json({**board.state(), "user": display_name(self._operator())})
         else:
@@ -335,6 +355,24 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"message": f"Stopped {target}."})
             else:
                 self._json({"error": "No such bot."}, 404)
+        elif path == "/api/sessions/delete":
+            variant = str(body.get("variant") or "")
+            account_id = slug_account_id(str(body.get("account_id") or ""))
+            problem = board.fleet.delete_session(variant, account_id)
+            if problem:
+                self._json({"error": problem}, 409)
+            else:
+                board.wallets.forget(variant, account_id)
+                self._json({"message": "Session deleted."})
+        elif path == "/api/wallets/refresh":
+            checked = board.wallets.refresh(force=True)
+            self._json({"message": f"Re-read {checked} account wallet(s)."})
+        elif path == "/api/tables/resume":
+            key = str(body.get("key") or "")
+            if board.coordinator.resume(key):
+                self._json({"message": f"Entry to {key} resumed."})
+            else:
+                self._json({"error": "That table is not paused."}, 404)
         elif path == "/api/fleet/prune":
             self._json({"message": f"Cleared {board.fleet.prune()} finished bot(s)."})
         elif path == "/api/settings":
@@ -342,16 +380,34 @@ class Handler(BaseHTTPRequestHandler):
 
         # -- coordinator (called by the bots)
         elif path == "/api/coord/permit":
-            self._json(board.coordinator.request_permit(
+            self._json(board.coordinator.request_lease(
                 str(body.get("bot_id") or ""),
                 str(body.get("game") or ""),
                 int(body.get("stake") or 0),
             ))
+        elif path == "/api/coord/renew":
+            self._json(board.coordinator.renew_lease(
+                str(body.get("bot_id") or ""), str(body.get("token") or "")
+            ))
         elif path == "/api/coord/release":
-            self._json(board.coordinator.release(
+            self._json(board.coordinator.release_lease(
                 str(body.get("bot_id") or ""),
                 str(body.get("token") or ""),
                 str(body.get("outcome") or "done"),
+            ))
+        elif path == "/api/coord/register":
+            board.coordinator.register(
+                str(body.get("bot_id") or ""),
+                account_id=str(body.get("account_id") or ""),
+                display_name=str(body.get("display_name") or ""),
+                phone_tail=str(body.get("phone_tail") or ""),
+            )
+            self._json({"ok": True})
+        elif path == "/api/coord/opponent":
+            self._json(board.coordinator.check_opponent(
+                str(body.get("bot_id") or ""),
+                str(body.get("name") or ""),
+                str(body.get("phone_tail") or ""),
             ))
         elif path == "/api/coord/report":
             payload = {k: v for k, v in body.items() if k not in ("bot_id", "state")}
@@ -392,6 +448,7 @@ class Handler(BaseHTTPRequestHandler):
 def serve(port: int = 8080, host: str = "127.0.0.1", bot_token: str = "") -> None:
     board = Dashboard(port, host, bot_token)
     board.lobby.start()
+    board.wallets.start()
 
     def housekeeping():
         while True:
@@ -417,4 +474,5 @@ def serve(port: int = 8080, host: str = "127.0.0.1", bot_token: str = "") -> Non
         board.fleet.stop_all()
     finally:
         board.lobby.stop()
+        board.wallets.stop()
         httpd.server_close()

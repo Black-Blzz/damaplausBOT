@@ -16,6 +16,10 @@
       <p class="brand-sub" id="greetSub">damaplus.online</p>
     </div>
   </div>
+  <nav class="tabs">
+    <a href="/" class="active" aria-current="page">Console</a>
+    <a href="/wallets">Wallets</a>
+  </nav>
   <div class="topbar-right">
     <div class="feed" id="feed">
       <span class="feed-dot" aria-hidden="true"></span>
@@ -79,10 +83,10 @@
           <select id="fStake"></select>
         </label>
 
-        <label class="field">
-          <span>How many <em id="fCountVal" class="mono">1</em></span>
-          <input type="range" id="fCount" min="1" max="5" step="1" value="1">
-        </label>
+        <div class="field">
+          <span>Accounts <em id="fPickedCount" class="mono">none selected</em></span>
+          <div class="picker" id="fAccounts"></div>
+        </div>
 
         <label class="field">
           <span>Seconds between each <em id="fStaggerVal" class="mono">2.0</em></span>

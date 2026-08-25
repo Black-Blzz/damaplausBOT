@@ -29,6 +29,7 @@ STATES = (
     "authenticating",
     "idle",
     "waiting_permit",
+    "waiting_turn",
     "queued",
     "matched",
     "playing",
@@ -47,6 +48,7 @@ class Permit:
     reason: str = ""
     humans: int = 0
     online: int = 0
+    waiting_turn: bool = False
 
 
 class NullControlClient:
@@ -60,8 +62,17 @@ class NullControlClient:
     async def acquire(self, game: str, stake: int, wait_seconds: float = 120.0) -> Permit | None:
         return None
 
+    async def renew(self, token: str) -> bool:
+        return True
+
     async def release(self, token: str, outcome: str = "done") -> None:
         return None
+
+    async def register(self, **fields: object) -> None:
+        return None
+
+    async def check_opponent(self, name: str = "", phone_tail: str = "") -> dict:
+        return {}
 
 
 class ControlClient:
@@ -118,15 +129,42 @@ class ControlClient:
                         int(answer.get("humans", 0)),
                         int(answer.get("online", 0)),
                     )
+                if answer.get("waiting_turn"):
+                    # Our turn will come; report it rather than burning the
+                    # whole wait budget queueing behind another of our bots.
+                    return Permit(False, reason=reason, waiting_turn=True)
             if time.monotonic() >= deadline:
                 return Permit(False, reason=reason) if reached else None
             await asyncio.sleep(float((answer or {}).get("retry_after", 2.0)))
+
+    async def renew(self, token: str) -> bool:
+        """Keep a table lease alive while still queuing.
+
+        ``True`` also when the console is unreachable: a network blip should not
+        make a bot abandon a queue it is legitimately sitting in.  Only an
+        explicit refusal from the coordinator counts as losing the lease.
+        """
+        if not token:
+            return True
+        answer = await asyncio.to_thread(self._post, "/api/coord/renew", {"token": token})
+        return True if answer is None else bool(answer.get("ok"))
 
     async def release(self, token: str, outcome: str = "done") -> None:
         if token:
             await asyncio.to_thread(
                 self._post, "/api/coord/release", {"token": token, "outcome": outcome}
             )
+
+    async def register(self, **fields: object) -> None:
+        """Tell the console who this bot is, so it can be spotted as an opponent."""
+        await asyncio.to_thread(self._post, "/api/coord/register", dict(fields))
+
+    async def check_opponent(self, name: str = "", phone_tail: str = "") -> dict:
+        """Ask whether the player we were just paired with is one of ours."""
+        answer = await asyncio.to_thread(
+            self._post, "/api/coord/opponent", {"name": name, "phone_tail": phone_tail}
+        )
+        return answer or {}
 
 
 def make_client(base_url: str | None, bot_id: str, token: str = "") -> ControlClient | NullControlClient:

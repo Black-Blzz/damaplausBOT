@@ -17,7 +17,7 @@ from pathlib import Path
 from playwright.async_api import Error as PlaywrightError, async_playwright
 
 from .control import make_client
-from .matchmaking import Entry
+from .matchmaking import Entry, read_opponent, wait_until_paired
 
 # Backoff per outcome, in seconds.  A stake the site is not offering is worth
 # waiting on properly rather than re-checking in a tight loop -- that spin is
@@ -25,6 +25,9 @@ from .matchmaking import Entry
 BACKOFF = {
     Entry.STAKE_UNAVAILABLE: 30.0,
     Entry.NOT_PERMITTED: 5.0,
+    # Another of our bots has this table; check back soon so we take our turn
+    # promptly once it is playing.
+    Entry.WAITING_TURN: 4.0,
     Entry.UI_UNAVAILABLE: 10.0,
     # A wallet only refills when a human tops it up, so re-check slowly and let
     # the bot resume on its own rather than making the operator restart it.
@@ -54,6 +57,11 @@ def build_parser(description: str) -> argparse.ArgumentParser:
                         help="identity reported to the dashboard")
     parser.add_argument("--control-token", default=None,
                         help="shared secret for the dashboard, when it requires one")
+    parser.add_argument("--phone-tail", default="",
+                        help="last 4 digits of this account's phone, used to "
+                             "recognise it if another of our bots faces it")
+    parser.add_argument("--display-name", default="",
+                        help="name this account shows to opponents")
     parser.add_argument("--headless", dest="headless", action="store_true", default=None,
                         help="run the browser with no window (required on a headless server)")
     parser.add_argument("--headed", dest="headless", action="store_false",
@@ -153,6 +161,11 @@ async def run_bot(
             log.error("could not read the site's stake list and none was given; pass --stake")
             return
 
+    await control.register(
+        account_id=account.id,
+        display_name=args.display_name or "",
+        phone_tail=args.phone_tail or "",
+    )
     await control.report("starting", game=game, stake=stake)
 
     async with async_playwright() as playwright:
@@ -199,6 +212,7 @@ async def run_bot(
 ENTRY_STATES = {
     Entry.STAKE_UNAVAILABLE: "stake_unavailable",
     Entry.LOW_BALANCE: "low_balance",
+    Entry.WAITING_TURN: "waiting_turn",
 }
 
 
@@ -212,6 +226,8 @@ async def _play_forever(bot, settings, log, control, game, stake, odd_only,
 
         if not result.joined:
             state = ENTRY_STATES.get(result.entry, "idle")
+            if result.entry is Entry.WAITING_TURN:
+                log.info("holding: %s", result.detail)
             if result.entry is Entry.LOW_BALANCE:
                 # Say it once at warning level, then stop repeating every minute.
                 if not warned_broke:
@@ -230,17 +246,39 @@ async def _play_forever(bot, settings, log, control, game, stake, odd_only,
 
         await control.report("queued", game=game, stake=stake,
                              detail=result.detail, balance=result.balance)
-        matched = await bot.wait_for_match(MATCH_WAIT_SECONDS)
-        # Free the table for the next bot as soon as our own entry has resolved.
-        await control.release(result.token, "matched" if matched else "timeout")
+
+        # Hold the table lease for the whole wait, renewing as we go, so no
+        # second bot of ours can be let into this queue behind us.
+        matched = await wait_until_paired(
+            bot.page,
+            start_notice_selector=settings.selectors.get("start_notice", ""),
+            turn_selector=settings.selectors["turn_indicator"],
+            control=control,
+            token=result.token,
+            timeout_seconds=MATCH_WAIT_SECONDS,
+            log=log,
+        )
+        # Only now is the table free for the next bot.
+        await control.release(result.token, "matched" if matched else "left")
 
         if not matched:
-            log.info("nobody paired with us inside the queue window; requeueing")
+            await bot.return_home()
             continue
 
         reporter.moves = 0
         await control.report("matched", game=game, stake=stake)
-        log.info("paired; playing")
+
+        # Confirm we are not facing one of our own accounts.  The lease should
+        # make this impossible; checking is how we find out if it did not.
+        name, tail = await read_opponent(bot.page)
+        if name:
+            log.info("paired against %s", name)
+            verdict = await control.check_opponent(name, tail)
+            if verdict.get("ours"):
+                log.error("SELF-PAIR: %s. Entry to this table is now paused.",
+                          verdict.get("reason", "opponent is one of ours"))
+        await control.report("matched", game=game, stake=stake, opponent=name)
+        log.info("playing")
         outcome = await play_match(bot, settings, log, reporter)
         log.info("match finished: %s", outcome or "unknown")
         await control.report(

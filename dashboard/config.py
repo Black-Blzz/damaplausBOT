@@ -11,8 +11,9 @@ SETTINGS_FILE = BASE_DIR / "dashboard-settings.json"
 
 SITE_URL = "https://damaplus.online"
 
-# Hard ceiling on concurrent bots, per the operator brief.
-MAX_BOTS = 5
+# Hard ceiling on concurrent bots.  Each one drives its own headless
+# Chromium, so this is a real resource commitment, not just a number.
+MAX_BOTS = 16
 
 # One entry per bot project.  ``game`` is the identifier the site uses in its
 # lobby API and in ``data-find-player``; ``variant`` is our internal short name.

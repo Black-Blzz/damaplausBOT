@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fleet Wallets</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <div>
+      <h1 id="greeting">Wallets</h1>
+      <p class="brand-sub">Fleet Console · damaplus.online</p>
+    </div>
+  </div>
+  <nav class="tabs">
+    <a href="/">Console</a>
+    <a href="/wallets" class="active" aria-current="page">Wallets</a>
+  </nav>
+  <div class="topbar-right">
+    <div class="feed" id="feed">
+      <span class="feed-dot" aria-hidden="true"></span>
+      <span id="feedLabel">checking</span>
+    </div>
+    <button class="btn" id="refresh" type="button">Re-check now</button>
+    <button class="btn btn-quiet" id="signOut" type="button">Sign out</button>
+  </div>
+</header>
+
+<section class="strip" aria-label="Wallet summary">
+  <div class="stat">
+    <span class="stat-label">Total across accounts</span>
+    <span class="stat-value mono"><b id="statTotal">&mdash;</b><em>birr</em></span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Accounts</span>
+    <span class="stat-value mono"><b id="statAccounts">0</b></span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Signed out</span>
+    <span class="stat-value mono"><b id="statSignedOut">0</b></span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Below the floor</span>
+    <span class="stat-value mono"><b id="statLow">0</b></span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">Last checked</span>
+    <span class="stat-value mono"><b id="statChecked">never</b></span>
+  </div>
+</section>
+
+<main class="layout layout-single">
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Every account</h2>
+      <p class="panel-note">
+        Read from the site directly, so a top-up appears here whether or not a bot
+        is running for that account. Re-checked automatically every 90 seconds.
+      </p>
+    </div>
+    <div class="panel-body scroll-x">
+      <table class="grid" id="wallets">
+        <thead>
+          <tr>
+            <th>Account</th>
+            <th>Game</th>
+            <th>Shows as</th>
+            <th class="num">Balance</th>
+            <th class="num">Bonus</th>
+            <th>Session</th>
+            <th class="num">Checked</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p class="empty" id="empty">No accounts yet. Add one from the Console page.</p>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="/wallets.js"></script>
+</body>
+</html>

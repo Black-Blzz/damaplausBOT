@@ -1,5 +1,6 @@
 # ---- Secrets ----
 *.storage.json
+*.meta.json
 sessions/
 dashboard-users.json
 dashboard-settings.json

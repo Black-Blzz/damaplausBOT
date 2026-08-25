@@ -8,6 +8,7 @@ let state = null;
 let gamesReady = false;
 let stakesKey = '';
 let lastLogCount = 0;
+let pickerSignature = '';
 let greeted = '';
 
 /* ── helpers ─────────────────────────────────────────────────── */
@@ -73,6 +74,7 @@ const STATES = {
   authenticating:    ['pill-idle',  'Signing in'],
   idle:              ['pill-idle',  'Idle'],
   waiting_permit:    ['pill-hold',  'Holding'],
+  waiting_turn:      ['pill-hold',  'Waiting its turn'],
   queued:            ['pill-live',  'In queue'],
   matched:           ['pill-go',    'Paired'],
   playing:           ['pill-go',    'Playing'],
@@ -134,14 +136,19 @@ function renderStrip(totals, lobby) {
 function renderAlerts(warnings) {
   const box = $('alerts');
   box.hidden = !warnings.length;
-  box.innerHTML = warnings.map((w) => `<p>${esc(w)}</p>`).join('');
+  box.innerHTML = warnings
+    .map((w) => `<p class="${w.startsWith('SELF-PAIR') ? 'critical' : ''}">${esc(w)}</p>`)
+    .join('');
 }
 
 function renderTables(rows) {
   $('tables').tBodies[0].innerHTML = rows.map((row) => {
     const ours = row.ours_queued + row.ours_playing;
     let entry;
-    if (row.holder) entry = `<span class="pill pill-live"><span>Entering</span></span>`;
+    if (row.paused) {
+      entry = `<span class="pill pill-fault"><span>Paused</span></span>`
+        + ` <button class="btn btn-tiny" type="button" data-resume="${esc(row.key)}">Resume</button>`;
+    } else if (row.holder) entry = `<span class="pill pill-live"><span>Ours entering</span></span>`;
     else if (row.enterable) entry = `<span class="pill pill-go"><span>Open</span></span>`;
     else if (row.humans === 0) entry = `<span class="pill pill-idle"><span>Empty</span></span>`;
     else entry = `<span class="pill pill-hold"><span>Even — hold</span></span>`;
@@ -161,7 +168,7 @@ function renderFleet(bots) {
   $('fleetEmpty').hidden = bots.length > 0;
   body.innerHTML = bots.map((bot) => {
     const t = bot.telemetry || {};
-    const detail = t.detail || bot.last_line || '';
+    const detail = t.opponent ? `vs ${t.opponent}` : (t.detail || bot.last_line || '');
     const record = `${t.wins || 0} / ${t.losses || 0} / ${t.draws || 0}`;
     const money = t.balance === null || t.balance === undefined
       ? '<span class="dim">—</span>'
@@ -200,12 +207,19 @@ function renderAccounts(sessions, variants) {
     for (const account of sessions[variant.id] || []) {
       const cls = account.status === 'active' ? 'pill-go'
                 : account.status === 'missing' ? 'pill-idle' : 'pill-fault';
+      const money = account.balance === null || account.balance === undefined
+        ? '' : `${Number(account.balance).toLocaleString()} birr`;
+      const low = account.balance !== null && account.balance !== undefined
+        && account.balance < (state?.settings?.min_balance ?? 10);
       items.push(`<li>
         <span class="acct">
           <b>${esc(account.account_id)}</b>
-          <em>${esc(variant.name)} · ${esc(account.modified)}</em>
+          <em>${esc(variant.name)}${money ? ` · <span class="mono ${low ? 'money-low' : ''}">${esc(money)}</span>` : ''}</em>
         </span>
         <span class="pill ${cls}"><span>${esc(account.status_label)}</span></span>
+        <button class="btn btn-tiny" type="button"
+                data-del-variant="${esc(variant.id)}" data-del-account="${esc(account.account_id)}"
+                title="Delete this saved sign-in">Delete</button>
       </li>`);
     }
   }
@@ -213,18 +227,56 @@ function renderAccounts(sessions, variants) {
   $('accountCount').textContent = items.length;
 }
 
+/* One row per saved account, so the operator picks exactly who plays. */
+function renderPicker() {
+  if (!state) return;
+  const variant = $('fGame').value;
+  const busy = new Set(state.bots.filter((b) => b.alive && b.variant === variant)
+                                 .map((b) => b.account_id));
+  const accounts = state.sessions[variant] || [];
+  const chosen = pickedAccounts();
+
+  // Rebuilding on every poll would fight the operator's clicks, so only redraw
+  // when the set of accounts or their availability actually changes.
+  const signature = variant + '|' + accounts
+    .map((a) => `${a.account_id}:${a.usable}:${busy.has(a.account_id)}`).join(',');
+  if (signature === pickerSignature) { updatePickedCount(); return; }
+  pickerSignature = signature;
+
+  $('fAccounts').innerHTML = accounts.length ? accounts.map((a) => {
+    const running = busy.has(a.account_id);
+    const why = running ? 'already running' : a.usable ? '' : a.status_label.toLowerCase();
+    const disabled = running || !a.usable;
+    return `<label class="pick ${disabled ? 'pick-off' : ''}">
+      <input type="checkbox" value="${esc(a.account_id)}" ${disabled ? 'disabled' : ''}
+             ${chosen.includes(a.account_id) && !disabled ? 'checked' : ''}>
+      <span class="pick-name">${esc(a.account_id)}</span>
+      ${why ? `<span class="pick-why">${esc(why)}</span>` : ''}
+    </label>`;
+  }).join('') : '<p class="empty">No accounts for this game yet. Add one below.</p>';
+
+  updatePickedCount();
+}
+
+function updatePickedCount() {
+  const count = pickedAccounts().length;
+  $('fPickedCount').textContent = count ? `${count} selected` : 'none selected';
+}
+
+function pickedAccounts() {
+  return [...$('fAccounts').querySelectorAll('input:checked')].map((i) => i.value);
+}
+
 /* Explain, before the operator presses Inject, exactly what will happen. */
 function renderReadout() {
   if (!state) return;
   const variant = $('fGame').value;
   const stake = Number($('fStake').value || 0);
-  const wanted = Number($('fCount').value);
   const meta = state.variants.find((v) => v.id === variant);
   if (!meta) return;
 
+  const picked = pickedAccounts();
   const table = state.tables.find((r) => r.game === meta.game && r.stake === stake);
-  const busy = new Set(state.bots.filter((b) => b.alive && b.variant === variant).map((b) => b.account_id));
-  const free = (state.sessions[variant] || []).filter((s) => s.usable && !busy.has(s.account_id)).length;
   const room = state.totals.max_bots - state.totals.alive;
 
   const lines = [];
@@ -234,14 +286,16 @@ function renderReadout() {
       : `<span class="hold">${table.humans} waiting — even, bots hold</span>`;
     lines.push(`${esc(gameName(meta.game))} at ${stake} birr · <b>${table.online}</b> online · ${parity}`);
   }
-  lines.push(`Free accounts: <b>${free}</b> · fleet slots left: <b>${room}</b>`);
-  if (free < wanted) {
-    lines.push(`<span class="fault">Need ${wanted - free} more account${wanted - free === 1 ? '' : 's'} — each bot signs in as its own.</span>`);
-  } else if (room < wanted) {
-    lines.push(`<span class="fault">Only ${Math.max(0, room)} slot${room === 1 ? '' : 's'} left of ${state.totals.max_bots}.</span>`);
+  lines.push(`Fleet slots left: <b>${room}</b> of ${state.totals.max_bots}`);
+  if (!picked.length) {
+    lines.push('<span class="hold">Tick the accounts you want to inject.</span>');
+  } else if (picked.length > room) {
+    lines.push(`<span class="fault">${picked.length} selected but only ${Math.max(0, room)} slot(s) free.</span>`);
+  } else {
+    lines.push(`Injecting as <b>${picked.map(esc).join('</b>, <b>')}</b>`);
   }
   $('readout').innerHTML = lines.join('<br>');
-  $('inject').disabled = free < wanted || room < wanted;
+  $('inject').disabled = !picked.length || picked.length > room;
 }
 
 function renderAuth(auth) {
@@ -279,6 +333,7 @@ async function refresh() {
   renderTables(state.tables);
   renderFleet(state.bots);
   renderAccounts(state.sessions, state.variants);
+  renderPicker();
   renderLog(state.logs);
   renderAuth(state.auth);
   renderReadout();
@@ -292,14 +347,18 @@ async function refresh() {
 
 /* ── wiring ──────────────────────────────────────────────────── */
 
-$('fCount').addEventListener('input', (e) => {
-  $('fCountVal').textContent = e.target.value;
+$('fAccounts').addEventListener('change', () => {
+  updatePickedCount();
   renderReadout();
 });
 $('fStagger').addEventListener('input', (e) => {
   $('fStaggerVal').textContent = Number(e.target.value).toFixed(1);
 });
-$('fGame').addEventListener('change', renderReadout);
+$('fGame').addEventListener('change', () => {
+  pickerSignature = '';   // force a redraw for the newly selected game
+  renderPicker();
+  renderReadout();
+});
 $('fMinBalance').addEventListener('change', async (e) => {
   try { await post('/api/settings', { min_balance: Number(e.target.value) }); }
   catch (error) { toast(error.message, 'bad'); }
@@ -323,7 +382,7 @@ $('inject').addEventListener('click', async () => {
     const data = await post('/api/fleet/launch', {
       variant: $('fGame').value,
       stake: Number($('fStake').value),
-      count: Number($('fCount').value),
+      accounts: pickedAccounts(),
       stagger_seconds: Number($('fStagger').value),
       min_balance: Number($('fMinBalance').value),
     });
@@ -354,12 +413,43 @@ $('prune').addEventListener('click', async () => {
   refresh();
 });
 
+$('tables').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-resume]');
+  if (!button) return;
+  button.disabled = true;
+  try {
+    toast((await post('/api/tables/resume', { key: button.dataset.resume })).message, 'ok');
+  } catch (error) {
+    toast(error.message, 'bad');
+  }
+  refresh();
+});
+
 $('fleet').addEventListener('click', async (event) => {
   const button = event.target.closest('[data-stop]');
   if (!button) return;
   button.disabled = true;
   try { await post('/api/fleet/stop', { bot_id: button.dataset.stop }); }
   catch (error) { toast(error.message, 'bad'); }
+  refresh();
+});
+
+$('accounts').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-del-account]');
+  if (!button) return;
+  const account = button.dataset.delAccount;
+  const warning = `Delete the saved sign-in for "${account}"?\n\n`
+    + 'The account keeps its money. This only removes the stored login, '
+    + 'so it will need a fresh SMS code before it can play again.';
+  if (!confirm(warning)) return;
+  button.disabled = true;
+  try {
+    const done = await post('/api/sessions/delete',
+      { variant: button.dataset.delVariant, account_id: account });
+    toast(done.message, 'ok');
+  } catch (error) {
+    toast(error.message, 'bad');
+  }
   refresh();
 });
 

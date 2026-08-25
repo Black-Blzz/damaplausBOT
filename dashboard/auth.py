@@ -9,6 +9,8 @@ away, which the previous version leaked.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import re
 import threading
 import time
@@ -20,6 +22,37 @@ from .config import BOT_VARIANTS, SITE_URL
 
 # A half-finished sign-in holds a browser open; drop it after this long.
 PENDING_TTL_SECONDS = 600.0
+
+# Names new accounts show to opponents.  The site displays whatever name an
+# account registered with, so calling them "Bot-<id>" told every opponent
+# exactly what they were playing.  One is chosen per account, deterministically,
+# so the same account always presents the same name.
+NEUTRAL_NAMES = (
+    "Abel", "Bereket", "Chala", "Dawit", "Eyob", "Fikru", "Girma", "Hanna",
+    "Kalkidan", "Lemma", "Meron", "Nardos", "Robel", "Selam", "Tigist", "Yonas",
+)
+
+
+def display_name_for(account_id: str) -> str:
+    """A stable, ordinary-looking name for one account."""
+    digest = hashlib.sha256(account_id.encode("utf-8")).digest()
+    return NEUTRAL_NAMES[digest[0] % len(NEUTRAL_NAMES)]
+
+
+def phone_tail(number: str) -> str:
+    """Last four digits -- all the site reveals of another player's phone."""
+    return "".join(ch for ch in str(number or "") if ch.isdigit())[-4:]
+
+
+def meta_path(session_file: Path) -> Path:
+    return session_file.with_name(session_file.name.replace(".storage.json", ".meta.json"))
+
+
+def load_meta(session_file: Path) -> dict:
+    try:
+        return json.loads(meta_path(session_file).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
 
 def normalise_phone(raw: str) -> str:
@@ -200,7 +233,7 @@ class AuthManager:
             if reply.get("requires_signup"):
                 self._set(key, "sending", f"{number} is new here - registering an account...")
                 self._log(f"{number} is a new customer; filling in the signup fields")
-                await page.locator("#authNameInput").fill(f"Bot-{account_id}")
+                await page.locator("#authNameInput").fill(display_name_for(account_id))
                 terms = page.locator("#authTermsInput")
                 if await terms.count() and not await terms.is_checked():
                     await terms.check()
@@ -274,6 +307,15 @@ class AuthManager:
             destination = BOT_VARIANTS[variant]["cwd"] / "sessions" / f"{account_id}.storage.json"
             destination.parent.mkdir(parents=True, exist_ok=True)
             await context.storage_state(path=str(destination))
+            # Keep the account's identity beside its session: the coordinator
+            # needs it to recognise this account if another of our bots is ever
+            # paired against it.
+            meta_path(destination).write_text(json.dumps({
+                "account_id": account_id,
+                "display_name": display_name_for(account_id),
+                "phone_tail": phone_tail(entry.get("phone", "")),
+                "saved_at": time.time(),
+            }, indent=2), encoding="utf-8")
         except AuthError:
             raise  # the browser is still good; the operator can retype the code
         except Exception as error:

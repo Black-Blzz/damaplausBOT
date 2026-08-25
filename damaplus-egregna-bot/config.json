@@ -3,7 +3,7 @@
   "headless": true,
   "poll_interval_seconds": 2.0,
   "action_delay_ms": [350, 900],
-  "difficulty_weights": {"easy": 1.0, "medium": 0.0, "hard": 0.0},
+  "difficulty_weights": {"medium": 1.0},
   "hard_search_depth": 7,
   "accounts": [
     {
@@ -21,6 +21,7 @@
     "match_found": "#damaBoard",
     "board_square": "#damaBoard > .square",
     "piece": ".piece",
+    "start_notice": "#damaStartNotice",
     "turn_indicator": "#damaStatus",
     "game_over": "#damaStatus",
     "return_home": ".nav-item[data-view='home']"
